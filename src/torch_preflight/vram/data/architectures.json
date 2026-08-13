@@ -427,39 +427,143 @@
       "activation_bytes_per_sample": 54577938
     },
     "whisper-tiny": {
-      "kind": "unknown",
-      "params": 37184640
+      "kind": "encoder-decoder",
+      "params": 37184640,
+      "shape": {
+        "layers": 4,
+        "hidden": 384,
+        "heads": 6,
+        "vocab": 51865,
+        "intermediate": 1536,
+        "decoder_layers": 4,
+        "encoder_seq_len": 1500,
+        "activation_family": "whisper",
+        "max_position": 448,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "whisper-base": {
-      "kind": "unknown",
-      "params": 72593920
+      "kind": "encoder-decoder",
+      "params": 72593920,
+      "shape": {
+        "layers": 6,
+        "hidden": 512,
+        "heads": 8,
+        "vocab": 51865,
+        "intermediate": 2048,
+        "decoder_layers": 6,
+        "encoder_seq_len": 1500,
+        "activation_family": "whisper",
+        "max_position": 448,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "whisper-small": {
-      "kind": "unknown",
-      "params": 241734912
+      "kind": "encoder-decoder",
+      "params": 241734912,
+      "shape": {
+        "layers": 12,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 51865,
+        "intermediate": 3072,
+        "decoder_layers": 12,
+        "encoder_seq_len": 1500,
+        "activation_family": "whisper",
+        "max_position": 448,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "whisper-medium": {
-      "kind": "unknown",
-      "params": 763857920
+      "kind": "encoder-decoder",
+      "params": 763857920,
+      "shape": {
+        "layers": 24,
+        "hidden": 1024,
+        "heads": 16,
+        "vocab": 51865,
+        "intermediate": 4096,
+        "decoder_layers": 24,
+        "encoder_seq_len": 1500,
+        "activation_family": "whisper",
+        "max_position": 448,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "whisper-large-v3": {
       "aliases": [
         "whisper-large"
       ],
-      "kind": "unknown",
-      "params": 1543304960
+      "kind": "encoder-decoder",
+      "params": 1543304960,
+      "shape": {
+        "layers": 32,
+        "hidden": 1280,
+        "heads": 20,
+        "vocab": 51866,
+        "intermediate": 5120,
+        "decoder_layers": 32,
+        "encoder_seq_len": 1500,
+        "activation_family": "whisper",
+        "max_position": 448,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "t5-small": {
-      "kind": "unknown",
-      "params": 60506624
+      "kind": "encoder-decoder",
+      "params": 60506624,
+      "shape": {
+        "layers": 6,
+        "hidden": 512,
+        "heads": 8,
+        "vocab": 32128,
+        "intermediate": 2048,
+        "decoder_layers": 6,
+        "activation_family": "t5",
+        "uses_dropout": true,
+        "max_position": 512,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "t5-base": {
-      "kind": "unknown",
-      "params": 222903552
+      "kind": "encoder-decoder",
+      "params": 222903552,
+      "shape": {
+        "layers": 12,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 32128,
+        "intermediate": 3072,
+        "decoder_layers": 12,
+        "activation_family": "t5",
+        "uses_dropout": true,
+        "max_position": 512,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "t5-large": {
-      "kind": "unknown",
-      "params": 737668096
+      "kind": "encoder-decoder",
+      "params": 737668096,
+      "shape": {
+        "layers": 24,
+        "hidden": 1024,
+        "heads": 16,
+        "vocab": 32128,
+        "intermediate": 4096,
+        "decoder_layers": 24,
+        "activation_family": "t5",
+        "uses_dropout": true,
+        "max_position": 512,
+        "tied_embeddings": true,
+        "has_lm_head": true
+      }
     },
     "clip-vit-base-patch32": {
       "aliases": [

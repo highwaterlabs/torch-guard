@@ -199,6 +199,56 @@ def test_measurement_fit_had_no_unexplained_constant():
         assert abs(measured[variant]["fit_constant_bytes"]) < largest * 1e-3
 
 
+# ----------------------------------------- encoder-decoder coefficients (measured)
+
+_ENCDEC_FILE = FIXTURES / "measured_encoder_decoder.json"
+
+
+@pytest.mark.skipif(
+    not _ENCDEC_FILE.exists(),
+    reason="run tests/calibration/measure_encoder_decoder.py to generate",
+)
+def test_encoder_decoder_constants_match_the_measurement():
+    """Changing a shipped coefficient without re-measuring must fail here."""
+    from torch_preflight.vram import costmodel
+
+    measured = _load("measured_encoder_decoder.json")["families"]
+    for family, shipped in costmodel.ENCODER_DECODER_COEFFS.items():
+        assert family in measured, f"{family} has no measurement behind it"
+        for key in ("enc_linear", "dec_linear", "cross_kv"):
+            assert shipped[key] == pytest.approx(measured[family][key], abs=0.5), (
+                f"{family}.{key} is {shipped[key]} but the fixture measured "
+                f"{measured[family][key]}"
+            )
+
+
+@pytest.mark.skipif(
+    not _ENCDEC_FILE.exists(),
+    reason="run tests/calibration/measure_encoder_decoder.py to generate",
+)
+def test_encoder_decoder_fit_residuals_stayed_small():
+    """A large residual means the functional form is wrong, not just the constants."""
+    for family, result in _load("measured_encoder_decoder.json")["families"].items():
+        assert result["encoder_residual_max_pct"] < 10, family
+        assert result["decoder_residual_max_pct"] < 10, family
+
+
+@pytest.mark.skipif(
+    not _ENCDEC_FILE.exists(),
+    reason="run tests/calibration/measure_encoder_decoder.py to generate",
+)
+def test_decoder_layers_cost_more_than_encoder_layers():
+    """A physical sanity check the degenerate fits all failed.
+
+    A decoder layer carries self-attention *and* cross-attention, so it must retain more
+    per layer than an encoder layer. The unconstrained fit returned a Whisper decoder
+    coefficient of 0.16 -- lower than its encoder -- which is what exposed the
+    collinearity rather than any residual.
+    """
+    for family, result in _load("measured_encoder_decoder.json")["families"].items():
+        assert result["dec_linear"] > result["enc_linear"], family
+
+
 # ------------------------------------------- the CUDA harness itself (no GPU needed)
 
 torch = pytest.importorskip("torch", reason="calibration harness needs torch")

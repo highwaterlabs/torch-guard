@@ -157,6 +157,7 @@ class Sharding(str, Enum):
 class ModelKind(str, Enum):
     TRANSFORMER = "transformer"
     CNN = "cnn"
+    ENCODER_DECODER = "encoder-decoder"
     UNKNOWN = "unknown"
 
 
@@ -182,6 +183,19 @@ class TransformerShape:
     #: the mask and the dropout output are both retained alongside the softmax output.
     #: Modern LLMs (Llama, Mistral, Qwen) ship with p=0.0, which short-circuits entirely.
     uses_dropout: bool = False
+    #: Decoder layer count for encoder-decoder models (T5, Whisper). When set, ``layers``
+    #: is the *encoder* depth and a decoder layer additionally carries cross-attention.
+    decoder_layers: int = 0
+    #: A fixed encoder length, where the architecture imposes one. Whisper always sees
+    #: 3000 mel frames, halved to 1500 positions by its stride-2 conv frontend, whatever
+    #: the audio actually contains — so the encoder cost does not vary with the run.
+    encoder_seq_len: Optional[int] = None
+    #: Which measured coefficient set to use; see ENCODER_DECODER_COEFFS.
+    activation_family: Optional[str] = None
+
+    @property
+    def is_encoder_decoder(self) -> bool:
+        return self.decoder_layers > 0
 
     def __post_init__(self) -> None:
         if not self.intermediate:

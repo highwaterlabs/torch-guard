@@ -87,6 +87,9 @@ def shape_from_dict(data: dict) -> TransformerShape:
         learned_positions=data.get("learned_positions", False),
         uses_dropout=data.get("uses_dropout", False),
         has_lm_head=data.get("has_lm_head", False),
+        decoder_layers=data.get("decoder_layers", 0),
+        encoder_seq_len=data.get("encoder_seq_len"),
+        activation_family=data.get("activation_family"),
     )
 
 

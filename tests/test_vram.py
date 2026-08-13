@@ -21,6 +21,7 @@ from torch_preflight.vram.solver import MAX_STACK, solve
 from torch_preflight.vram.types import (
     GIB,
     Confidence,
+    ModelKind,
     OptimizerKind,
     PrecisionMode,
     RiskBand,
@@ -628,3 +629,86 @@ def test_deepspeed_malformed_config_degrades_quietly(tmp_path):
         files={"bad.json": "{not valid json"},
     )
     assert extracted.config.sharding is Sharding.ZERO2
+
+# ------------------------------------------------------- encoder-decoder (T5, Whisper)
+
+
+def _encdec_config(**kwargs):
+    from torch_preflight.vram.types import PrecisionMode
+
+    base = dict(batch_size=1, seq_len=128, precision=PrecisionMode.FP16_MASTER)
+    base.update(kwargs)
+    return RunConfig(**base)
+
+
+@pytest.mark.parametrize(
+    "name", ["t5-small", "t5-base", "t5-large", "whisper-tiny", "whisper-large-v3"]
+)
+def test_encoder_decoder_models_now_estimate_activations(name):
+    """These reported activations as unknown before; they carry a shape now."""
+    profile = archdb.resolve(name)
+    assert profile.kind is ModelKind.ENCODER_DECODER
+    assert profile.shape.is_encoder_decoder
+    report = estimate(profile, _encdec_config())
+    assert report.breakdown.activations > 0
+
+
+def test_whisper_encoder_cost_does_not_depend_on_the_configured_sequence_length():
+    """Whisper always pads to 3000 mel frames, so its encoder is a fixed 1500 positions.
+
+    Only the decoder responds to `seq_len`. This is the property that makes Whisper's
+    encoder-dominated profile look so different from T5's, and getting it wrong would make
+    long-target runs look far more expensive than they are.
+    """
+    from torch_preflight.vram.costmodel import encoder_decoder_activation_bytes
+
+    shape = archdb.resolve("whisper-small").shape
+    assert shape.encoder_seq_len == 1500
+    short = encoder_decoder_activation_bytes(shape, _encdec_config(seq_len=32), 32)
+    long = encoder_decoder_activation_bytes(shape, _encdec_config(seq_len=128), 128)
+    # The decoder grows, but nowhere near proportionally: the fixed encoder dominates.
+    assert long > short
+    assert long < short * 2
+
+
+def test_t5_activations_grow_superlinearly_with_sequence_length():
+    """Both stacks scale with seq_len, and the attention terms are quadratic."""
+    from torch_preflight.vram.costmodel import encoder_decoder_activation_bytes
+
+    shape = archdb.resolve("t5-base").shape
+    small = encoder_decoder_activation_bytes(shape, _encdec_config(seq_len=128), 128)
+    large = encoder_decoder_activation_bytes(shape, _encdec_config(seq_len=256), 256)
+    assert large > 2 * small
+
+
+def test_encoder_decoder_activations_are_linear_in_batch_size():
+    from torch_preflight.vram.costmodel import encoder_decoder_activation_bytes
+
+    shape = archdb.resolve("t5-base").shape
+    one = encoder_decoder_activation_bytes(shape, _encdec_config(batch_size=1), 128)
+    four = encoder_decoder_activation_bytes(shape, _encdec_config(batch_size=4), 128)
+    assert four == pytest.approx(4 * one, rel=1e-6)
+
+
+def test_unknown_encoder_decoder_family_reports_unknown_rather_than_guessing():
+    """A family with no measured coefficients must widen the interval, not invent one."""
+    from torch_preflight.vram.costmodel import encoder_decoder_activation_bytes
+    from torch_preflight.vram.types import TransformerShape
+
+    shape = TransformerShape(
+        layers=6, hidden=512, heads=8, decoder_layers=6, activation_family="bart"
+    )
+    assert encoder_decoder_activation_bytes(shape, _encdec_config(), 128) is None
+
+
+def test_encoder_decoder_parameter_formula_counts_cross_attention():
+    """A decoder layer has two attention blocks, so it cannot cost the same as an encoder
+    layer. Without the cross-attention term the formula under-counts T5 by ~10%."""
+    from torch_preflight.vram.types import TransformerShape
+
+    common = dict(layers=6, hidden=512, heads=8, intermediate=2048, vocab=32128)
+    encoder_only = params_from_transformer_shape(TransformerShape(**common))
+    enc_dec = params_from_transformer_shape(
+        TransformerShape(decoder_layers=6, **common)
+    )
+    assert enc_dec > 2 * (encoder_only - common["vocab"] * common["hidden"])

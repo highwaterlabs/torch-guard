@@ -108,8 +108,28 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [ ] **Calibration covers one GPU.** `CUDA_CONTEXT_BYTES` is a single T4 data point;
       `hardware.Gpu.context_mib` holds per-card overrides as more arrive. An A100/H100
       run would be the most valuable next measurement.
-- [ ] Encoder-decoder models (T5, Whisper) have parameter counts but no shape, so no
-      activation estimate.
+- [x] **Encoder-decoder activations measured** for T5 and Whisper (8 snapshot entries),
+      so they estimate instead of reporting unknown. A decoder-only formula cannot express
+      these: there are two sequence lengths, and a decoder layer carries a third attention
+      block whose K/V projections run at the *encoder* length.
+      `tests/calibration/measure_encoder_decoder.py` fits per-family coefficients on the
+      meta device. Validated against direct measurement to **2.5% worst case** over 12
+      shapes, including whisper-medium and t5-large which were held out of the fit.
+      `params_from_transformer_shape` now counts cross-attention too (T5 exact, Whisper
+      within 2.7% -- its conv frontend and learned position tables are not in the formula).
+
+      Three separate collinearities had to be broken, and **every degenerate version
+      reported a better residual than the correct one**, which is worth remembering the
+      next time a fit here looks clean:
+      - encoder-linear against cross-KV: identical columns when `L_enc == L_dec`, which is
+        true of every T5 and Whisper size. 0.00% residual, enc_linear 26.84 against a true
+        48.34. Fixed by measuring the encoder alone first.
+      - linear against quadratic, and decoder-linear against cross-attention: Whisper's
+        encoder length is fixed at 1500 and every size uses head_dim 64, so those columns
+        are exactly proportional -- unidentifiable in principle. Unconstrained it returned
+        `dec_linear = 0.16`. Both quadratic terms are pinned to the separately measured
+        attention coefficient; T5, where the split *is* identifiable, fits cross-attention
+        free at 6.03 against the pinned 6.0.
 - [ ] Grouped-query attention shrinks the KV projections; the activation formula ignores
       that and will slightly over-estimate GQA models.
 - [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
