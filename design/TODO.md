@@ -168,6 +168,29 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [ ] Feed real `guard.accuracy` measurements back into the calibration fixtures — needs a
       GPU session, same as the remaining CUDA constants.
 
+### Rules beyond the first five
+
+- [x] **TG006 — binary cross-entropy activation mismatch.** Four cases: `sigmoid` into
+      `BCEWithLogitsLoss` (double sigmoid, error, autofixable when inline), the same via a
+      variable, raw logits into `BCELoss` (`nan` on the first negative value, error), and
+      `sigmoid` + `BCELoss`, which is *correct* but numerically fragile, so it warns rather
+      than errors. Clean on torch's 2,285 files after one round of triage.
+
+      Two bugs found while building it, both now regression-tested:
+      - **`Provenance.criteria` was a flat name -> class map**, so two functions each
+        binding `crit` collided and whichever was parsed last decided the class for both.
+        A correct `BCELoss` call was reported as a double-sigmoid error against
+        `BCEWithLogitsLoss`. Now scope-aware, matching `grad` and `models`. **This
+        affected TG005 too.**
+      - **Three false positives in `torch/testing/_internal/common_nn.py`**: flagging any
+        `nn.Sigmoid()` construction in a file that mentioned `BCEWithLogitsLoss` anywhere.
+        A bare `sigmoid = nn.Sigmoid()` local used to build a reference implementation is
+        not a model ending in a sigmoid; only final position in an `nn.Sequential` is.
+- [ ] TG007-TG009 and TG011-TG014, listed in [IDEAS.md](IDEAS.md). TG007 (CPU-GPU
+      thrashing) needs care: `.item()` is the *fix* for TG001 but a sync point in a hot
+      loop, so the rule has to tell "once per step" from "once per element" or it will
+      contradict a rule we already ship.
+
 ## Cross-cutting
 
 - [x] Name and org settled: package `torch-preflight`, org `highwaterlabs`, deliberately

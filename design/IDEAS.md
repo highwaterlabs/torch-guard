@@ -9,8 +9,6 @@ do it, or to an [RFC](rfcs/) when it needs a design first.
 
 Each is one file plus a `@register` decorator — the registry was built for this.
 
-- **TG006** `nn.BCELoss` fed raw logits — should be `BCEWithLogitsLoss`, which is also
-  numerically stable. Same machinery as TG005, cheap to add.
 - **TG007** CPU↔GPU thrashing: `.cpu()`, `.numpy()`, `.item()` inside the training loop.
   Nuance — `.item()` is the *fix* for TG001 but a sync point in a hot loop. The rule has to
   distinguish "once per step" from "once per element", or it will contradict TG001.

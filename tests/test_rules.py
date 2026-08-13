@@ -423,7 +423,9 @@ def test_bad_example_triggers_every_rule():
 
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
-    assert {d.code for d in diagnostics} == {"TG001", "TG002", "TG003", "TG004", "TG005"}
+    assert {d.code for d in diagnostics} == {
+        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006",
+    }
 
 
 def test_tg001_quiet_for_non_differentiable_outputs():
@@ -657,5 +659,150 @@ def test_a_model_in_an_enclosing_scope_is_still_visible():
                     out = wrapped(batch)
 
             evaluate()
+        """
+    )
+
+
+# --------------------------------------------------------------------- TG006
+
+
+def test_tg006_flags_sigmoid_into_the_fused_loss():
+    """Double sigmoid: the fused loss applies one itself."""
+    assert "TG006" in codes(
+        """
+        import torch, torch.nn as nn
+        def train(model, loader):
+            criterion = nn.BCEWithLogitsLoss()
+            for x, y in loader:
+                loss = criterion(torch.sigmoid(model(x)), y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg006_flags_sigmoid_through_a_variable():
+    assert "TG006" in codes(
+        """
+        import torch, torch.nn as nn
+        def train(model, loader):
+            criterion = nn.BCEWithLogitsLoss()
+            for x, y in loader:
+                probs = torch.sigmoid(model(x))
+                loss = criterion(probs, y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg006_flags_raw_logits_into_plain_bce():
+    """`log` of a negative number is `nan`, on the first negative logit."""
+    assert "TG006" in codes(
+        """
+        import torch.nn as nn
+        def train(model, loader):
+            criterion = nn.BCELoss()
+            for x, y in loader:
+                logits = model(x)
+                loss = criterion(logits, y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg006_warns_on_the_numerically_fragile_but_correct_pairing():
+    diagnostics = analyze(
+        """
+        import torch, torch.nn as nn
+        def train(model, loader):
+            criterion = nn.BCELoss()
+            for x, y in loader:
+                probs = torch.sigmoid(model(x))
+                loss = criterion(probs, y)
+                loss.backward()
+        """
+    )
+    found = [d for d in diagnostics if d.code == "TG006"]
+    assert found and all(d.severity.name == "WARNING" for d in found), (
+        "sigmoid + BCELoss is correct, just fragile; it must not be an error"
+    )
+
+
+def test_tg006_silent_on_correct_usage():
+    """Raw logits into the fused loss is the recommended pairing."""
+    assert "TG006" not in codes(
+        """
+        import torch.nn as nn
+        def train(model, loader):
+            criterion = nn.BCEWithLogitsLoss()
+            for x, y in loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg006_does_not_confuse_two_criterions_in_different_scopes():
+    """Regression: `criteria` was a flat name->class map, so two functions each binding
+    `crit` collided and whichever was parsed last decided the class for both. A correct
+    `BCELoss` call was reported as a double-sigmoid error against `BCEWithLogitsLoss`."""
+    diagnostics = analyze(
+        """
+        import torch, torch.nn as nn
+        def fine(model, loader):
+            crit = nn.BCELoss()
+            for x, y in loader:
+                probs = torch.sigmoid(model(x))
+                crit(probs, y).backward()
+
+        def also_fine(model, loader):
+            crit = nn.BCEWithLogitsLoss()
+            for x, y in loader:
+                crit(model(x), y).backward()
+        """
+    )
+    found = [d for d in diagnostics if d.code == "TG006"]
+    assert len(found) == 1 and found[0].severity.name == "WARNING", (
+        f"expected only the fragile-pairing warning, got {[(d.line, d.message) for d in found]}"
+    )
+
+
+def test_tg006_does_not_flag_a_bare_sigmoid_layer():
+    """Regression: three false positives in torch/testing/_internal/common_nn.py.
+
+    A local `sigmoid = nn.Sigmoid()` used to build a reference implementation is not a
+    model ending in a sigmoid. Only final position in an `nn.Sequential` is evidence.
+    """
+    assert "TG006" not in codes(
+        """
+        import torch.nn as nn
+        def reference_test():
+            sigmoid = nn.Sigmoid()
+            criterion = nn.BCEWithLogitsLoss()
+            return sigmoid, criterion
+        """
+    )
+
+
+def test_tg006_flags_sequential_ending_in_sigmoid():
+    assert "TG006" in codes(
+        """
+        import torch.nn as nn
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = nn.Sequential(nn.Linear(4, 1), nn.Sigmoid())
+                self.criterion = nn.BCEWithLogitsLoss()
+        """
+    )
+
+
+def test_tg006_silent_without_any_bce_loss():
+    assert "TG006" not in codes(
+        """
+        import torch.nn as nn
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = nn.Sequential(nn.Linear(4, 1), nn.Sigmoid())
         """
     )

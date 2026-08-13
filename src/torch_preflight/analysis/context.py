@@ -42,6 +42,12 @@ class FileContext:
     softmax_vars: Dict[str, str] = field(default_factory=dict)
     uses_cross_entropy: bool = False
     uses_nll_loss: bool = False
+    #: Names assigned the result of a sigmoid call, e.g. ``probs``.
+    sigmoid_vars: Dict[str, str] = field(default_factory=dict)
+    #: Any sigmoid at all in the file, call or layer. Its *absence* is the evidence that
+    #: a value reaching ``BCELoss`` is raw logits rather than probabilities.
+    has_sigmoid: bool = False
+    uses_bce_with_logits: bool = False
     is_lightning: bool = False
     uses_cuda: bool = False
 
@@ -57,6 +63,9 @@ class _FactCollector(cst.CSTVisitor):
         self.softmax_vars: Dict[str, str] = {}
         self.uses_cross_entropy = False
         self.uses_nll_loss = False
+        self.sigmoid_vars: Dict[str, str] = {}
+        self.has_sigmoid = False
+        self.uses_bce_with_logits = False
         self.is_lightning = False
 
     def visit_Import(self, node: cst.Import) -> bool:
@@ -89,6 +98,11 @@ class _FactCollector(cst.CSTVisitor):
                     name = dotted_name(target.target)
                     if name:
                         self.softmax_vars[name] = leaf
+            elif leaf in ("sigmoid", "Sigmoid"):
+                for target in node.targets:
+                    name = dotted_name(target.target)
+                    if name:
+                        self.sigmoid_vars[name] = "sigmoid"
         return True
 
     def visit_Call(self, node: cst.Call) -> bool:
@@ -97,6 +111,10 @@ class _FactCollector(cst.CSTVisitor):
             self.uses_cross_entropy = True
         elif leaf in ("NLLLoss", "nll_loss"):
             self.uses_nll_loss = True
+        elif leaf in ("BCEWithLogitsLoss", "binary_cross_entropy_with_logits"):
+            self.uses_bce_with_logits = True
+        if leaf in ("sigmoid", "Sigmoid"):
+            self.has_sigmoid = True
         return True
 
 
@@ -122,6 +140,9 @@ def build_context(path: str, source: str, module: Optional[cst.Module] = None) -
         softmax_vars=facts.softmax_vars,
         uses_cross_entropy=facts.uses_cross_entropy,
         uses_nll_loss=facts.uses_nll_loss,
+        sigmoid_vars=facts.sigmoid_vars,
+        has_sigmoid=facts.has_sigmoid or ".sigmoid()" in source,
+        uses_bce_with_logits=facts.uses_bce_with_logits,
         is_lightning=facts.is_lightning,
         uses_cuda=any(marker in source for marker in _CUDA_MARKERS),
     )
