@@ -1,0 +1,31 @@
+{
+  "note": "CUDA-allocator constants measured by tests/calibration/measure_cuda.py. These are the two values that cannot be measured without NVIDIA hardware.",
+  "measurements": [
+    {
+      "gpu": "Tesla T4",
+      "gpu_key": "t4",
+      "torch_version": "2.11.0+cu128",
+      "cuda_version": "12.8",
+      "total_memory_gib": 14.56,
+      "cuda_context": {
+        "after_init": 110100480,
+        "after_cublas": 137363456,
+        "after_cudnn": 141426688
+      },
+      "cuda_context_bytes": 141426688,
+      "fragmentation_fraction": 0.059,
+      "fragmentation_range": [
+        0.024,
+        0.083
+      ],
+      "fragmentation_samples_note": "5 fixed-shape transformer configs; variable-shape workloads fragment more",
+      "fragmentation_note": "0.059 measured on synthetic fixed-shape stacks. NOT adopted: the six real-model runs in measured_peaks.json imply 0.105 (range 0.062-0.125). Toy stacks allocate a handful of uniform tensors and under-fragment; calibrate the allocator against real models.",
+      "fragmentation_from_real_models": 0.105
+    }
+  ],
+  "adopted": {
+    "cuda_context_mib": 135,
+    "fragmentation_fraction": 0.105,
+    "caveat": "Single card (T4). Larger GPUs plausibly carry a bigger CUDA context; hardware.Gpu.context_mib overrides per device as data arrives."
+  }
+}

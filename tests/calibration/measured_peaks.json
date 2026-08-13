@@ -1,0 +1,120 @@
+{
+  "note": "Peak memory measured on real hardware. 'measured_peak_bytes' is max_memory_reserved + the CUDA context, i.e. what actually occupies the card \u2014 reserved already includes fragmentation, and the context sits outside PyTorch's accounting. Produced by tests/calibration/measure_cuda.py --models.",
+  "tolerance": 0.25,
+  "runs": [
+    {
+      "model": "gpt2",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 4,
+        "seq_len": 128,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 3192782848,
+      "measured_allocated_bytes": 2705153536,
+      "measured_reserved_bytes": 3042967552,
+      "cuda_context_bytes": 149815296,
+      "params": 124439808,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "gpt2",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 8,
+        "seq_len": 256,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 6242041856,
+      "measured_allocated_bytes": 5736883712,
+      "measured_reserved_bytes": 6092226560,
+      "cuda_context_bytes": 149815296,
+      "params": 124439808,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "distilbert-base-uncased",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 4,
+        "seq_len": 128,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 1651376128,
+      "measured_allocated_bytes": 1354818048,
+      "measured_reserved_bytes": 1501560832,
+      "cuda_context_bytes": 149815296,
+      "params": 66362880,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "distilbert-base-uncased",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 8,
+        "seq_len": 256,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 2104360960,
+      "measured_allocated_bytes": 1757328384,
+      "measured_reserved_bytes": 1954545664,
+      "cuda_context_bytes": 149815296,
+      "params": 66362880,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "bert-base-uncased",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 4,
+        "seq_len": 128,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 2632843264,
+      "measured_allocated_bytes": 2209738240,
+      "measured_reserved_bytes": 2483027968,
+      "cuda_context_bytes": 149815296,
+      "params": 109482240,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "bert-base-uncased",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 8,
+        "seq_len": 256,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 3641573376,
+      "measured_allocated_bytes": 3185408000,
+      "measured_reserved_bytes": 3491758080,
+      "cuda_context_bytes": 149815296,
+      "params": 109482240,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    }
+  ]
+}

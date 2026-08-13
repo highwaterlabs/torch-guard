@@ -1,0 +1,23 @@
+{
+  "note": "Published parameter counts. The analytic formula in costmodel.params_from_transformer_shape must land within tolerance of each.",
+  "tolerance": 0.03,
+  "models": {
+    "gpt2": 124439808,
+    "gpt2-medium": 354823168,
+    "gpt2-large": 774030080,
+    "gpt2-xl": 1557611200,
+    "bert-base-uncased": 109482240,
+    "bert-large-uncased": 335141888,
+    "roberta-base": 124645632,
+    "distilbert-base-uncased": 66362880,
+    "llama-2-7b": 6738415616,
+    "llama-2-13b": 13015864320,
+    "llama-2-70b": 68976648192,
+    "llama-3-8b": 8030261248,
+    "llama-3-70b": 70553706496,
+    "mistral-7b": 7241732096,
+    "qwen2-7b": 7615616512,
+    "vit-base-patch16-224": 86567656,
+    "vit-large-patch16-224": 304326632
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "torch_version": "2.13.0",
+  "method": "saved_tensors_hooks on torch.device('meta'), deduped by storage._cdata",
+  "sweep": {
+    "layers": 4,
+    "hidden": 1024,
+    "heads": 16,
+    "intermediate": 4096,
+    "batch": 2,
+    "seqs": [
+      128,
+      256,
+      512,
+      1024,
+      2048
+    ]
+  },
+  "results": {
+    "minimal": {
+      "act_linear_coeff": 32.01,
+      "act_attn_coeff": 2.0,
+      "fit_constant_bytes": 0,
+      "measured_bytes_by_seq": {
+        "128": 75513856,
+        "256": 167804928,
+        "512": 402718720,
+        "1024": 1073872896,
+        "2048": 3221487616
+      }
+    },
+    "realistic": {
+      "act_linear_coeff": 36.01,
+      "act_attn_coeff": 6.0,
+      "fit_constant_bytes": 0,
+      "measured_bytes_by_seq": {
+        "128": 100679680,
+        "256": 251691008,
+        "512": 704708608,
+        "1024": 2214723584,
+        "2048": 7650672640
+      }
+    },
+    "flash": {
+      "act_linear_coeff": 36.01,
+      "residual_quadratic": 511.9999999999524,
+      "measured_bytes_by_seq": {
+        "128": 83902464,
+        "256": 184582144,
+        "512": 436273152,
+        "1024": 1140981760,
+        "2048": 3355705344
+      }
+    },
+    "checkpointing": {
+      "normal_bytes": 704708608,
+      "checkpointed_bytes": 16777216,
+      "reduction": 0.9762,
+      "checkpoint_act_coeff": 2.0,
+      "note": "forward-only; excludes the one-layer recompute transient during backward"
+    }
+  }
+}

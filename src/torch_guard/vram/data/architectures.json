@@ -1,0 +1,468 @@
+{
+  "version": 1,
+  "note": "Hand-curated snapshot. 'params' is the published parameter count where known; 'shape' drives the activation formula. CNN entries deliberately carry no activation data - see design/TODO.md, measuring those is a calibration task and guessing them would be worse than reporting 'unknown'. 'uses_dropout' selects the measured activation coefficients: dropout p>0 triples the quadratic attention term (see tests/calibration/measure_activations.py).",
+  "models": {
+    "gpt2": {
+      "aliases": [
+        "openai-community/gpt2",
+        "gpt-2"
+      ],
+      "kind": "transformer",
+      "params": 124439808,
+      "shape": {
+        "layers": 12,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 50257,
+        "intermediate": 3072,
+        "max_position": 1024,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true,
+        "has_lm_head": true
+      }
+    },
+    "gpt2-medium": {
+      "kind": "transformer",
+      "params": 354823168,
+      "shape": {
+        "layers": 24,
+        "hidden": 1024,
+        "heads": 16,
+        "vocab": 50257,
+        "intermediate": 4096,
+        "max_position": 1024,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true,
+        "has_lm_head": true
+      }
+    },
+    "gpt2-large": {
+      "kind": "transformer",
+      "params": 774030080,
+      "shape": {
+        "layers": 36,
+        "hidden": 1280,
+        "heads": 20,
+        "vocab": 50257,
+        "intermediate": 5120,
+        "max_position": 1024,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true,
+        "has_lm_head": true
+      }
+    },
+    "gpt2-xl": {
+      "kind": "transformer",
+      "params": 1557611200,
+      "shape": {
+        "layers": 48,
+        "hidden": 1600,
+        "heads": 25,
+        "vocab": 50257,
+        "intermediate": 6400,
+        "max_position": 1024,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true,
+        "has_lm_head": true
+      }
+    },
+    "bert-base-uncased": {
+      "aliases": [
+        "bert-base",
+        "bert-base-cased",
+        "google-bert/bert-base-uncased"
+      ],
+      "kind": "transformer",
+      "params": 109482240,
+      "shape": {
+        "layers": 12,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 30522,
+        "intermediate": 3072,
+        "max_position": 512,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true
+      }
+    },
+    "bert-large-uncased": {
+      "aliases": [
+        "bert-large"
+      ],
+      "kind": "transformer",
+      "params": 335141888,
+      "shape": {
+        "layers": 24,
+        "hidden": 1024,
+        "heads": 16,
+        "vocab": 30522,
+        "intermediate": 4096,
+        "max_position": 512,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true
+      }
+    },
+    "roberta-base": {
+      "kind": "transformer",
+      "params": 124645632,
+      "shape": {
+        "layers": 12,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 50265,
+        "intermediate": 3072,
+        "max_position": 514,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true
+      }
+    },
+    "roberta-large": {
+      "kind": "transformer",
+      "params": 355359744,
+      "shape": {
+        "layers": 24,
+        "hidden": 1024,
+        "heads": 16,
+        "vocab": 50265,
+        "intermediate": 4096,
+        "max_position": 514,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true
+      }
+    },
+    "distilbert-base-uncased": {
+      "aliases": [
+        "distilbert-base"
+      ],
+      "kind": "transformer",
+      "params": 66362880,
+      "shape": {
+        "layers": 6,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 30522,
+        "intermediate": 3072,
+        "max_position": 512,
+        "tied_embeddings": true,
+        "learned_positions": true,
+        "uses_dropout": true
+      }
+    },
+    "llama-2-7b": {
+      "aliases": [
+        "meta-llama/llama-2-7b-hf",
+        "llama-2-7b-hf",
+        "llama2-7b"
+      ],
+      "kind": "transformer",
+      "params": 6738415616,
+      "shape": {
+        "layers": 32,
+        "hidden": 4096,
+        "heads": 32,
+        "vocab": 32000,
+        "intermediate": 11008,
+        "max_position": 4096,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "llama-2-13b": {
+      "aliases": [
+        "meta-llama/llama-2-13b-hf",
+        "llama2-13b"
+      ],
+      "kind": "transformer",
+      "params": 13015864320,
+      "shape": {
+        "layers": 40,
+        "hidden": 5120,
+        "heads": 40,
+        "vocab": 32000,
+        "intermediate": 13824,
+        "max_position": 4096,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "llama-2-70b": {
+      "aliases": [
+        "meta-llama/llama-2-70b-hf",
+        "llama2-70b"
+      ],
+      "kind": "transformer",
+      "params": 68976648192,
+      "shape": {
+        "layers": 80,
+        "hidden": 8192,
+        "heads": 64,
+        "kv_heads": 8,
+        "vocab": 32000,
+        "intermediate": 28672,
+        "max_position": 4096,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "llama-3-8b": {
+      "aliases": [
+        "meta-llama/meta-llama-3-8b",
+        "meta-llama/llama-3.1-8b",
+        "llama-3.1-8b",
+        "llama3-8b"
+      ],
+      "kind": "transformer",
+      "params": 8030261248,
+      "shape": {
+        "layers": 32,
+        "hidden": 4096,
+        "heads": 32,
+        "kv_heads": 8,
+        "vocab": 128256,
+        "intermediate": 14336,
+        "max_position": 8192,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "llama-3-70b": {
+      "aliases": [
+        "meta-llama/meta-llama-3-70b",
+        "llama-3.1-70b",
+        "llama3-70b"
+      ],
+      "kind": "transformer",
+      "params": 70553706496,
+      "shape": {
+        "layers": 80,
+        "hidden": 8192,
+        "heads": 64,
+        "kv_heads": 8,
+        "vocab": 128256,
+        "intermediate": 28672,
+        "max_position": 8192,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "mistral-7b": {
+      "aliases": [
+        "mistralai/mistral-7b-v0.1",
+        "mistralai/mistral-7b-instruct-v0.2",
+        "mistral-7b-v0.1"
+      ],
+      "kind": "transformer",
+      "params": 7241732096,
+      "shape": {
+        "layers": 32,
+        "hidden": 4096,
+        "heads": 32,
+        "kv_heads": 8,
+        "vocab": 32000,
+        "intermediate": 14336,
+        "max_position": 32768,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "qwen2-7b": {
+      "aliases": [
+        "qwen/qwen2-7b",
+        "qwen2.5-7b"
+      ],
+      "kind": "transformer",
+      "params": 7615616512,
+      "shape": {
+        "layers": 28,
+        "hidden": 3584,
+        "heads": 28,
+        "kv_heads": 4,
+        "vocab": 152064,
+        "intermediate": 18944,
+        "max_position": 32768,
+        "gated_mlp": true,
+        "has_lm_head": true
+      }
+    },
+    "phi-2": {
+      "aliases": [
+        "microsoft/phi-2"
+      ],
+      "kind": "transformer",
+      "params": 2779683840,
+      "shape": {
+        "layers": 32,
+        "hidden": 2560,
+        "heads": 32,
+        "vocab": 51200,
+        "intermediate": 10240,
+        "max_position": 2048,
+        "learned_positions": false,
+        "has_lm_head": true
+      }
+    },
+    "gpt-j-6b": {
+      "aliases": [
+        "eleutherai/gpt-j-6b"
+      ],
+      "kind": "transformer",
+      "params": 6050882784,
+      "shape": {
+        "layers": 28,
+        "hidden": 4096,
+        "heads": 16,
+        "vocab": 50400,
+        "intermediate": 16384,
+        "max_position": 2048,
+        "has_lm_head": true
+      }
+    },
+    "vit-base-patch16-224": {
+      "aliases": [
+        "vit-base",
+        "google/vit-base-patch16-224",
+        "vit_b_16"
+      ],
+      "kind": "transformer",
+      "params": 86567656,
+      "shape": {
+        "layers": 12,
+        "hidden": 768,
+        "heads": 12,
+        "vocab": 0,
+        "intermediate": 3072,
+        "max_position": 197,
+        "tied_embeddings": true
+      }
+    },
+    "vit-large-patch16-224": {
+      "aliases": [
+        "vit-large",
+        "vit_l_16"
+      ],
+      "kind": "transformer",
+      "params": 304326632,
+      "shape": {
+        "layers": 24,
+        "hidden": 1024,
+        "heads": 16,
+        "vocab": 0,
+        "intermediate": 4096,
+        "max_position": 197,
+        "tied_embeddings": true
+      }
+    },
+    "resnet18": {
+      "kind": "cnn",
+      "params": 11689512,
+      "reference_image_size": 224
+    },
+    "resnet34": {
+      "kind": "cnn",
+      "params": 21797672,
+      "reference_image_size": 224
+    },
+    "resnet50": {
+      "kind": "cnn",
+      "params": 25557032,
+      "reference_image_size": 224
+    },
+    "resnet101": {
+      "kind": "cnn",
+      "params": 44549160,
+      "reference_image_size": 224
+    },
+    "resnet152": {
+      "kind": "cnn",
+      "params": 60192808,
+      "reference_image_size": 224
+    },
+    "vgg16": {
+      "kind": "cnn",
+      "params": 138357544,
+      "reference_image_size": 224
+    },
+    "vgg19": {
+      "kind": "cnn",
+      "params": 143667240,
+      "reference_image_size": 224
+    },
+    "densenet121": {
+      "kind": "cnn",
+      "params": 7978856,
+      "reference_image_size": 224
+    },
+    "mobilenet_v2": {
+      "kind": "cnn",
+      "params": 3504872,
+      "reference_image_size": 224
+    },
+    "efficientnet_b0": {
+      "kind": "cnn",
+      "params": 5288548,
+      "reference_image_size": 224
+    },
+    "convnext_tiny": {
+      "kind": "cnn",
+      "params": 28589128,
+      "reference_image_size": 224
+    },
+    "whisper-tiny": {
+      "kind": "unknown",
+      "params": 37184640
+    },
+    "whisper-base": {
+      "kind": "unknown",
+      "params": 72593920
+    },
+    "whisper-small": {
+      "kind": "unknown",
+      "params": 241734912
+    },
+    "whisper-medium": {
+      "kind": "unknown",
+      "params": 763857920
+    },
+    "whisper-large-v3": {
+      "aliases": [
+        "whisper-large"
+      ],
+      "kind": "unknown",
+      "params": 1543304960
+    },
+    "t5-small": {
+      "kind": "unknown",
+      "params": 60506624
+    },
+    "t5-base": {
+      "kind": "unknown",
+      "params": 222903552
+    },
+    "t5-large": {
+      "kind": "unknown",
+      "params": 737668096
+    },
+    "clip-vit-base-patch32": {
+      "aliases": [
+        "openai/clip-vit-base-patch32"
+      ],
+      "kind": "unknown",
+      "params": 151277313
+    },
+    "stable-diffusion-v1-5-unet": {
+      "aliases": [
+        "sd-v1-5-unet"
+      ],
+      "kind": "unknown",
+      "params": 859520964
+    }
+  }
+}

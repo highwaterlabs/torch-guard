@@ -1,0 +1,166 @@
+# TODO
+
+Decided work, grouped by phase. Delete items when done — git remembers them.
+Undecided things live in [IDEAS.md](IDEAS.md).
+
+---
+
+## Phase 0 — static linter core ✅ done
+
+TG001–TG005, provenance analysis, engine, autofixer, 4 reporters, CLI, config,
+suppressions, pre-commit hooks, GitHub Action, CI matrix.
+
+## Phase 1 — VRAM static tier ✅ done
+
+Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
+
+- [x] `vram/hardware.py` — 24 GPUs + 21 cloud instances, usable (not advertised) capacity
+- [x] `vram/costmodel.py` — six-term model, constants isolated in a CALIBRATION block
+- [x] `vram/archdb.py` + bundled snapshot — 40 architectures, ships in the wheel
+- [x] `vram/extract.py` — RunConfig from the CST, with per-field provenance
+- [x] `vram/solver.py` — remediation search with mutual-exclusion groups and a capped
+      greedy stack
+- [x] `torch-guard estimate` / `torch-guard gpus`
+- [x] Risk banding with error intervals; no fabricated probability
+- [x] TG010, gated on `target_gpu`, silent at low confidence, never touches the network
+- [x] `tests/calibration/` — parameter formula enforced to 3% against published counts
+- [x] Base-install CI job asserting torch/huggingface_hub never load
+
+### Calibration ✅ activation side done
+
+- [x] Spike [0001](spikes/0001-meta-device-activation-capture.md) — GO. `saved_tensors_hooks`
+      works on meta, dedup via `storage._cdata`, fused attention is *not* a blind spot
+- [x] `tests/calibration/measure_activations.py` — measures the activation coefficients on
+      the meta device, no GPU required
+- [x] Coefficients are now architecture-dependent and measured: dropout triples the
+      quadratic term, so Llama-class models are no longer over-charged (−44% on the
+      llama-2-7b activation estimate)
+- [x] Constants pinned by tests — changing one without re-measuring fails the suite
+
+### Before shipping
+
+- [x] **Triaged every torch finding.** My guess that they were "plausibly intentional
+      retention" was wrong: four of the five were our bugs. 10 findings -> 5, all of the
+      survivors deliberate graph retention. Each fix is regression-tested:
+      - **`models_to_test` read as a validation dataloader.** In a test suite half the
+        identifiers contain "test". An eval-loader name must now also look like something
+        you iterate batches from (`loader`/`dataset`/`batches`/...).
+      - **`get_loss(...)` treated as a torch functional** because it ends in `_loss`,
+        returning grad-bearing regardless of its arguments. That suffix heuristic now
+        applies only to the known `F.*` functionals when called by a bare name.
+      - **`torch.autograd.grad(...)`** returns detached tensors unless `create_graph=True`.
+      - **Name leakage across functions.** `prov.models` was a flat, file-wide set, so
+        `prepared = DistributedDataParallel(...)` in one helper made an unrelated
+        `prepared` a thousand lines away look like a model. Both `models` and `grad`
+        lookups are now scope-aware and stop at the first scope that binds the name — the
+        same bug also let an outer `loss` leak into a nested helper with its own `loss`.
+
+      Remaining 5, all judged true-but-intentional (a `# noqa` case, not a rule change):
+      - `_inductor/fx_passes/numeric_utils.py:151,152` — TG003, a gradient-comparison
+        harness that deliberately calls `backward(retain_graph=True)` in an optimizer loop
+      - `distributed/pipelining/schedules.py:304` — TG001, pipeline parallelism must hold
+        microbatch losses until their backward runs
+      - `dist_autograd_test.py:2086,2098` — TG001, a dict deliberately chaining
+        graph-attached tensors across ranks
+
+      Reproduce with: `torch-guard check <site-packages>/torch -f json`
+
+### Known gaps that came out of building it
+
+- [ ] **CNN activation memory is not modelled.** Vision entries in the snapshot carry
+      parameter counts only, so a ResNet estimate reports activations as unknown and
+      widens the interval. Needs measured feature-map sizes per architecture — the same
+      measurement problem as below.
+- [x] `CUDA_CONTEXT_BYTES` (135 MiB) and `FRAGMENTATION_FRACTION` (0.105) measured on a
+      Tesla T4; end-to-end peaks recorded for GPT-2, BERT and DistilBERT. Mean absolute
+      error against measured peaks is now 5.0%.
+- [ ] **Causal-LM loss temporaries are a floor.** GPT-2 at batch 8 x seq 256 is still 20%
+      under. The derived term (logits + fp32 upcast + log_softmax) does not capture
+      everything real loss implementations allocate — HF's `shift_logits` contiguous copy
+      is one candidate. Needs a vocab/batch sweep to pin down; two data points is not
+      enough to fit a coefficient, and guessing one would defeat the purpose.
+- [ ] **Calibration covers one GPU.** `CUDA_CONTEXT_BYTES` is a single T4 data point;
+      `hardware.Gpu.context_mib` holds per-card overrides as more arrive. An A100/H100
+      run would be the most valuable next measurement.
+- [ ] Encoder-decoder models (T5, Whisper) have parameter counts but no shape, so no
+      activation estimate.
+- [ ] Grouped-query attention shrinks the KV projections; the activation formula ignores
+      that and will slightly over-estimate GQA models.
+- [ ] DeepSpeed ZeRO stage is read from a JSON config we do not parse — we assume stage 2.
+
+## Phase 2 — exact tier
+
+- [x] Run spike [0001](spikes/0001-meta-device-activation-capture.md) — **GO**
+- [x] `vram/providers/meta.py` + `[vram]` extra. Exact parameter counts and measured
+      activations for arbitrary models via `module:factory` entry points, with
+      `--model-args key=value`. Both spike traps are handled: parameter storages are
+      excluded and dedup keys on `storage._cdata`. Cross-checked against
+      `params_from_transformer_shape` — measuring and deriving agree, which is the
+      strongest validation available without a GPU. Failures degrade to UNKNOWN rather
+      than crashing, and `check` never reaches this path.
+- [x] Model autodetection Layer 2 — `vram/autodetect.py`. Folds constructor arguments and
+      module-level constants, resolves the class through the file's own imports, and
+      meta-instantiates it. Guarded by an import-safety check: a module whose top level
+      builds objects or calls functions is refused, because importing it would do that
+      work for real. Unresolvable arguments are named, never guessed.
+- [x] `[hub]` integration tested properly. Real `config.json` files are captured in
+      `tests/fixtures/hub/` and replayed offline; a `network`-marked test (deselected by
+      default, `pytest -m network`, plus a non-blocking CI job) hits the live hub.
+      **This found two bugs the hand-written offline tests could not**, because I had
+      authored both the field mapping and the fixtures so they agreed:
+      - `tie_word_embeddings` absent means **True** in transformers, not False. Defaulting
+        to False double-counted `vocab x hidden` and put GPT-2 31% over its real size.
+      - DistilBERT names its fields `dim` / `hidden_dim` / `n_heads` / `tie_weights_`, and
+        `hidden_dim` is the FFN width, not the model width. It resolved to nothing at all.
+      All four captured models now derive within 0.1% of their published counts.
+
+## Phase 3 — runtime ✅ done
+
+- [x] `VRAMGuard` context manager — exact parameter/gradient/optimizer accounting from the
+      live model, inferring optimizer kind and precision from the objects themselves.
+      Raises only on `CERTAIN_OOM`; anything less certain warns, because aborting a job on
+      a guess is worse than the OOM it would prevent. `strict=True` opts into raising.
+      Exported lazily from `torch_guard` so the base install still never imports torch.
+- [x] Verification against `torch.cuda.max_memory_allocated()` on exit, exposed as
+      `guard.measured_peak` and `guard.accuracy`.
+- [ ] Feed real `guard.accuracy` measurements back into the calibration fixtures — needs a
+      GPU session, same as the remaining CUDA constants.
+
+## Cross-cutting
+
+- [ ] **Name + org, before anything is published.** `torch-guard` is free on PyPI and
+      GitHub. `torchguard` (no hyphen) is an active package in the same niche, so the two
+      will compete for searches permanently — last cheap moment to change. Name the org
+      separately from the package either way. See RFC 0002 §7.
+- [ ] Create the public GitHub org and repo. The private `torch-guard-cloud` repo is not
+      needed until there is commercial code for it.
+- [ ] Put a short "what stays free" section in the public README, per RFC 0002 §6.
+- [ ] Make `design/` tracked in the public repo (drop it from .gitignore) now that it is
+      public — and check the README's `design/` links resolve on GitHub.
+- [ ] Nothing is committed yet; `git init` has been run but the tree is unstaged
+- [ ] Snapshot refresh process: how is `archdb` regenerated, and on what cadence?
+- [x] **Stress-tested against torch's own source** (2285 files). False-positive rate after
+      fixes: **0.0033 findings/file** — 3 findings in 900 files, all "true but intentional"
+      deliberate graph retention (pipeline parallelism, distributed autograd tests). Three
+      real rule bugs found and fixed, each now regression-tested:
+      - `x.requires_grad = <expr>` seeded grad on any value, not just `True`; a detached
+        leaf now also clears any seed (hit `torch.utils.checkpoint`)
+      - "loss" matched mid-word in helper names with no grad flowing in
+        (`_multilabelmarginloss_reference`); loss-named helpers now need a grad-bearing arg
+      - `dist_autograd.backward(ctx, [loss])` accumulates into an RPC context, not `.grad`
+      - TG003 now also requires an optimizer step in the loop: `.backward()` with nothing
+        applying the gradients has nothing to go stale
+
+- [x] **PERFORMANCE fixed: 14 min -> 51 s on torch (2285 files), a ~16x speedup.**
+      Three changes, each measured:
+      1. **One shared traversal** for all rules (`RuleDispatcher`) instead of one walk per
+         rule — rules are no longer visitors, they are handlers reading dispatcher-owned
+         state. 367 -> 92 ms/file (4.0x).
+      2. **Deferred position resolution.** `PositionProvider.resolve` cost 3.1 s on a
+         1.3 MB file — *more than parsing it* — and ~99.7% of files have no findings at
+         all. Diagnostics now carry the node and positions are filled in afterwards, only
+         when a file actually reported something. 92 -> 67 ms/file (5.5x cumulative).
+      3. **Process pool across files**, with `--jobs`. Sequential when `--fix` is on,
+         because the fixer replaces nodes by identity in the tree the rules ran against.
+         Falls back to sequential if the environment refuses to fork.
+      Parallel and sequential results are asserted identical in `tests/test_engine.py`.

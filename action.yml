@@ -1,0 +1,77 @@
+name: torch-guard
+description: Static analysis for PyTorch training code - VRAM leaks, convergence bugs, GPU stalls.
+author: Himanshu Janbandhu
+
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  paths:
+    description: Files or directories to check.
+    required: false
+    default: "."
+  format:
+    description: Output format - terminal, json, github (inline PR annotations) or sarif.
+    required: false
+    default: github
+  output:
+    description: Write the report to this file instead of stdout (use with format:sarif).
+    required: false
+    default: ""
+  fail-on:
+    description: Minimum severity that fails the job - error, warning or note.
+    required: false
+    default: error
+  select:
+    description: Comma-separated rule codes to run exclusively.
+    required: false
+    default: ""
+  ignore:
+    description: Comma-separated rule codes to skip.
+    required: false
+    default: ""
+  version:
+    description: Version specifier for the pip install, e.g. "==0.1.0".
+    required: false
+    default: ""
+  python-version:
+    description: Python version used to run torch-guard.
+    required: false
+    default: "3.11"
+
+outputs:
+  exit-code:
+    description: 0 when clean, 1 when findings reached the fail-on threshold.
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install torch-guard
+      shell: bash
+      run: python -m pip install --disable-pip-version-check "torch-guard${{ inputs.version }}"
+
+    - name: Run torch-guard
+      id: run
+      shell: bash
+      run: |
+        args=(check ${{ inputs.paths }} --format "${{ inputs.format }}" --fail-on "${{ inputs.fail-on }}")
+        [ -n "${{ inputs.select }}" ] && args+=(--select "${{ inputs.select }}")
+        [ -n "${{ inputs.ignore }}" ] && args+=(--ignore "${{ inputs.ignore }}")
+
+        set +e
+        if [ -n "${{ inputs.output }}" ]; then
+          torch-guard "${args[@]}" > "${{ inputs.output }}"
+        else
+          torch-guard "${args[@]}"
+        fi
+        code=$?
+        set -e
+
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        exit $code
