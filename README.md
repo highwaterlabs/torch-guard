@@ -46,7 +46,7 @@ Found 1 error in 1 file(s).
 - 🧮 **Pre-flight VRAM estimation** — projects peak memory from your script and says which
   change would make it fit
 - 🛠️ **Autofixes** via concrete syntax tree rewrites, so formatting and comments survive untouched
-- 📊 **Measured, not guessed** — every constant calibrated against real hardware, **5.0% mean
+- 📊 **Measured, not guessed** — every constant calibrated against real hardware, **3.7% mean
   error** versus measured peaks
 - 🤫 **Quiet on real code** — **5 findings across PyTorch's own 2,239 files**, all deliberate
 - ⚡ **No GPU and no PyTorch required** — pure static analysis over [LibCST](https://github.com/Instagram/LibCST); a CI job asserts torch is never imported
@@ -149,7 +149,7 @@ Memory estimators are easy to write and easy to be quietly wrong about. So:
 |  |  |
 |---|---|
 | **Constants are measured** | Activation coefficients from `saved_tensors_hooks` on the meta device; allocator behaviour and CUDA context from a real GPU. Measurement showed the published Megatron constants are a midpoint of two regimes — models with dropout retain 3× the attention tensors — so Llama-class models are charged the cheaper rate they actually pay. |
-| **Projections are checked** | **5.0% mean absolute error** against measured peaks for GPT-2, BERT and DistilBERT on a T4. Harness and fixtures in [`tests/calibration/`](https://github.com/highwaterlabs/torch-preflight/tree/main/tests/calibration/), so you can re-run them. |
+| **Projections are checked** | **3.7% mean absolute error** against measured peaks for GPT-2, BERT, DistilBERT and ResNet-50 on a T4. Harness and fixtures in [`tests/calibration/`](https://github.com/highwaterlabs/torch-preflight/tree/main/tests/calibration/), so you can re-run them. |
 | **It refuses to guess** | An unrecognised model reports `UNKNOWN` and widens the interval rather than inventing a parameter count. Verdicts are bands with an error range, never a fabricated "95% risk" score. |
 | **It stays quiet** | **5 findings across PyTorch's own 2,239 files**, every one deliberate. That pass found four bugs in the rules, now regression-tested. |
 

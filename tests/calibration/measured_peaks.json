@@ -13,10 +13,10 @@
         "gradient_checkpointing": false,
         "flash_attention": false
       },
-      "measured_peak_bytes": 3192782848,
+      "measured_peak_bytes": 3184394240,
       "measured_allocated_bytes": 2705153536,
       "measured_reserved_bytes": 3042967552,
-      "cuda_context_bytes": 149815296,
+      "cuda_context_bytes": 141426688,
       "params": 124439808,
       "torch_version": "2.11.0+cu128",
       "note": "Tesla T4, reserved + context, steady-state step"
@@ -32,10 +32,10 @@
         "gradient_checkpointing": false,
         "flash_attention": false
       },
-      "measured_peak_bytes": 6242041856,
+      "measured_peak_bytes": 6233653248,
       "measured_allocated_bytes": 5736883712,
       "measured_reserved_bytes": 6092226560,
-      "cuda_context_bytes": 149815296,
+      "cuda_context_bytes": 141426688,
       "params": 124439808,
       "torch_version": "2.11.0+cu128",
       "note": "Tesla T4, reserved + context, steady-state step"
@@ -51,10 +51,10 @@
         "gradient_checkpointing": false,
         "flash_attention": false
       },
-      "measured_peak_bytes": 1651376128,
+      "measured_peak_bytes": 1642987520,
       "measured_allocated_bytes": 1354818048,
       "measured_reserved_bytes": 1501560832,
-      "cuda_context_bytes": 149815296,
+      "cuda_context_bytes": 141426688,
       "params": 66362880,
       "torch_version": "2.11.0+cu128",
       "note": "Tesla T4, reserved + context, steady-state step"
@@ -70,10 +70,10 @@
         "gradient_checkpointing": false,
         "flash_attention": false
       },
-      "measured_peak_bytes": 2104360960,
+      "measured_peak_bytes": 2095972352,
       "measured_allocated_bytes": 1757328384,
       "measured_reserved_bytes": 1954545664,
-      "cuda_context_bytes": 149815296,
+      "cuda_context_bytes": 141426688,
       "params": 66362880,
       "torch_version": "2.11.0+cu128",
       "note": "Tesla T4, reserved + context, steady-state step"
@@ -89,10 +89,10 @@
         "gradient_checkpointing": false,
         "flash_attention": false
       },
-      "measured_peak_bytes": 2632843264,
+      "measured_peak_bytes": 2624454656,
       "measured_allocated_bytes": 2209738240,
       "measured_reserved_bytes": 2483027968,
-      "cuda_context_bytes": 149815296,
+      "cuda_context_bytes": 141426688,
       "params": 109482240,
       "torch_version": "2.11.0+cu128",
       "note": "Tesla T4, reserved + context, steady-state step"
@@ -108,11 +108,49 @@
         "gradient_checkpointing": false,
         "flash_attention": false
       },
-      "measured_peak_bytes": 3641573376,
+      "measured_peak_bytes": 3633184768,
       "measured_allocated_bytes": 3185408000,
       "measured_reserved_bytes": 3491758080,
-      "cuda_context_bytes": 149815296,
+      "cuda_context_bytes": 141426688,
       "params": 109482240,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "resnet50",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 16,
+        "image_size": 224,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 1336803328,
+      "measured_allocated_bytes": 1119203840,
+      "measured_reserved_bytes": 1195376640,
+      "cuda_context_bytes": 141426688,
+      "params": 25557032,
+      "torch_version": "2.11.0+cu128",
+      "note": "Tesla T4, reserved + context, steady-state step"
+    },
+    {
+      "model": "resnet50",
+      "gpu": "t4",
+      "config": {
+        "batch_size": 32,
+        "image_size": 224,
+        "precision": "amp",
+        "optimizer": "adamw",
+        "gradient_checkpointing": false,
+        "flash_attention": false
+      },
+      "measured_peak_bytes": 2142109696,
+      "measured_allocated_bytes": 1839903232,
+      "measured_reserved_bytes": 2000683008,
+      "cuda_context_bytes": 141426688,
+      "params": 25557032,
       "torch_version": "2.11.0+cu128",
       "note": "Tesla T4, reserved + context, steady-state step"
     }

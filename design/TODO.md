@@ -71,16 +71,40 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       with no GPU — I had wrongly filed this as needing one. Batch-linearity and
       area-scaling are verified at measurement time, not assumed.
 - [x] `CUDA_CONTEXT_BYTES` (135 MiB) and `FRAGMENTATION_FRACTION` (0.105) measured on a
-      Tesla T4; end-to-end peaks recorded for GPT-2, BERT and DistilBERT. Mean absolute
-      error against measured peaks is now 5.0%.
+      Tesla T4; end-to-end peaks recorded for GPT-2, BERT, DistilBERT and ResNet-50. Mean
+      absolute error against the eight measured peaks is **3.7%**.
+- [x] **The meta-measured CNN activations check out against a real allocator.** ResNet-50
+      on a T4 came in at +5.6% (batch 16) and +1.4% (batch 32) — the first end-to-end
+      confirmation that measuring on a device that allocates nothing predicts a device that
+      does. A re-measurement with the vision runs included puts fragmentation at 0.098
+      against the shipped 0.105; the difference is within run-to-run spread and the shipped
+      value errs high, so it stands.
 - [x] **LM-head retained bytes measured**: exactly 4.00 per logit element, across five
       shapes and three vocabularies, precision-independent. Split out from the fitted
       backward-transient part so the evidence for each is visible.
-- [ ] **The LM-head backward transient is still fitted on two points.** GPT-2 at batch 8 x
-      seq 256 remains ~20% under. Sweeping the constant lowers mean error monotonically to
-      18 bytes/element, which means it is absorbing a systematic under-estimate rather
-      than converging — so it was deliberately not tuned. Needs measured peaks across a
-      vocab/batch sweep on real hardware.
+- [x] **LM-head backward transient measured**, replacing the two-point fit. The sweep it
+      needed now exists (`measure_cuda.py --lm-head-sweep`): four vocabularies from 8k to
+      128k at two batch sizes on a tiny body, eight peaks spanning 16x in logit count.
+      Least squares gives 15.72 bytes per logit of peak, 14.22 after dividing out
+      fragmentation, minus the measured 4 retained — so the constant went 6 -> 10 and mean
+      absolute error 4.4% -> 3.7%. Still *not* the fixture optimum of 14: GPT-2 is the only
+      measured peak with an LM head, so that "fit" is two points again, and they disagree
+      in sign.
+- [ ] **The per-logit cost is not batch-invariant** — ~19.7 bytes/logit at batch 4 against
+      ~14.7 at batch 8, consistently across all four vocabularies. A single constant cannot
+      express that, which is why GPT-2 at batch 8 stays ~12% under. Worth understanding
+      before adding a batch term: it is more likely an allocator reuse effect at peak than
+      a real difference in bytes required.
+- [x] **`VRAMGuard` ignored activations entirely** — `profile_live_model` returns exact
+      parameter counts and no shape, so the term silently read zero. Measured against a
+      real ResNet-50 at batch 32 the guard projected 0.61 GiB where the card peaked at
+      1.86: **−67.5%**, and *under*-estimating is the direction that keeps a guard quiet
+      through the OOM it exists to prevent. It now measures activations from the live
+      module via `functional_call` on meta parameters — no allocation, no mutation of the
+      caller's model — giving +8.8% on the same case.
+- [ ] **The guard's measurement is forward-only**, so for a language model it sees the
+      logits but not the loss temporaries that peak during backward. The static estimator
+      models those; the guard does not.
 - [ ] **Calibration covers one GPU.** `CUDA_CONTEXT_BYTES` is a single T4 data point;
       `hardware.Gpu.context_mib` holds per-card overrides as more arrive. An A100/H100
       run would be the most valuable next measurement.

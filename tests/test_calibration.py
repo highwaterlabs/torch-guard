@@ -323,7 +323,8 @@ def test_mean_error_against_measured_peaks_stays_small():
         raw = run["config"]
         config = RunConfig(
             batch_size=raw["batch_size"],
-            seq_len=raw["seq_len"],
+            seq_len=raw.get("seq_len"),
+            image_size=raw.get("image_size"),
             precision=PrecisionMode(raw["precision"]),
             optimizer=OptimizerKind(raw["optimizer"]),
             gradient_checkpointing=raw["gradient_checkpointing"],

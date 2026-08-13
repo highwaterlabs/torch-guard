@@ -196,3 +196,107 @@ def test_parse_memory_units(text, expected):
     assert hardware.parse_memory(text) == expected
 
 
+
+
+# --------------------------------------------------------------- measured activations
+
+
+def _conv_model():
+    """A small conv net: activations dominate, which is the case that used to be missed."""
+    return torch.nn.Sequential(
+        torch.nn.Conv2d(3, 32, 3, padding=1), torch.nn.BatchNorm2d(32), torch.nn.ReLU(),
+        torch.nn.Conv2d(32, 64, 3, padding=1), torch.nn.ReLU(),
+    )
+
+
+def test_guard_measures_activations_when_given_an_image_size():
+    """The term the guard used to leave at zero is now measured from the live module."""
+    guard = VRAMGuard(_conv_model(), max_vram="8GiB", batch_size=8, image_size=32,
+                      verify=False)
+    assert guard.activation_source == "measured"
+    assert guard.profile.activation_bytes_per_sample > 0
+    with guard:
+        pass
+    assert guard.report.breakdown.activations > 0
+
+
+def test_measured_activations_scale_with_the_declared_batch_size():
+    """Stored per-sample, so doubling the batch doubles the activation term exactly."""
+    small = VRAMGuard(_conv_model(), max_vram="8GiB", batch_size=4, image_size=32,
+                      verify=False)
+    large = VRAMGuard(_conv_model(), max_vram="8GiB", batch_size=8, image_size=32,
+                      verify=False)
+    assert small.profile.activation_bytes_per_sample == large.profile.activation_bytes_per_sample
+    with small, large:
+        pass
+    assert large.report.breakdown.activations == 2 * small.report.breakdown.activations
+
+
+def test_measuring_activations_does_not_touch_the_model():
+    """It runs on meta parameters via functional_call — the caller's model is untouched."""
+    model = _conv_model()
+    model.eval()
+    before = [(p.device, p.dtype, p.requires_grad, float(p.detach().sum())) for p in model.parameters()]
+    VRAMGuard(model, max_vram="8GiB", batch_size=8, image_size=32, verify=False)
+    after = [(p.device, p.dtype, p.requires_grad, float(p.detach().sum())) for p in model.parameters()]
+    assert before == after
+    assert model.training is False, "eval mode must be restored"
+
+
+def test_measurement_allocates_nothing():
+    """The whole point: a guard that measures activations must not itself use memory."""
+    from torch_preflight.vram.guard import measure_activation_bytes
+
+    model = _conv_model()
+    measured = measure_activation_bytes(model, torch.zeros(4, 3, 64, 64, device="meta"))
+    assert measured is not None and measured > 0
+    # A meta input cannot have been backed by real storage.
+    assert all(p.device.type == "cpu" for p in model.parameters())
+
+
+def test_activations_stay_unknown_without_a_shape():
+    """No seq_len or image_size means nothing to build an input from — say unknown."""
+    guard = VRAMGuard(_guard_model(), max_vram="8GiB", batch_size=4, verify=False)
+    assert guard.activation_source == "unknown"
+    assert guard.profile.activation_bytes_per_sample is None
+
+
+def test_measurement_can_be_switched_off():
+    guard = VRAMGuard(_conv_model(), max_vram="8GiB", batch_size=8, image_size=32,
+                      measure_activations=False, verify=False)
+    assert guard.activation_source == "unknown"
+    assert guard.profile.activation_bytes_per_sample is None
+
+
+def test_an_explicit_activation_figure_wins_over_measurement():
+    guard = VRAMGuard(_conv_model(), max_vram="8GiB", batch_size=8, image_size=32,
+                      activation_bytes_per_sample=12345, verify=False)
+    assert guard.activation_source == "caller"
+    assert guard.profile.activation_bytes_per_sample == 12345
+
+
+def test_a_module_that_cannot_run_on_meta_degrades_to_unknown():
+    """Failure must widen the interval, never be mistaken for zero activations."""
+
+    class NeedsRealData(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            if x.sum().item() > 0:  # .item() cannot work on a meta tensor
+                return self.linear(x)
+            return self.linear(x)
+
+    guard = VRAMGuard(NeedsRealData(), max_vram="8GiB", batch_size=4, seq_len=8,
+                      verify=False)
+    assert guard.activation_source == "unknown"
+    assert guard.profile.activation_bytes_per_sample is None
+
+
+def test_an_explicit_example_input_is_used():
+    """For models whose input shape cannot be guessed from seq_len or image_size."""
+    guard = VRAMGuard(_conv_model(), max_vram="8GiB", batch_size=8,
+                      example_input=torch.zeros(2, 3, 32, 32), verify=False)
+    assert guard.activation_source == "measured"
+    assert guard.profile.activation_bytes_per_sample > 0
