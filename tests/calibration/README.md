@@ -19,7 +19,9 @@ that happens to produce confident-looking output.
 | `param_counts.json` | Published parameter counts | 3% | ✅ enforced |
 | Precision/optimizer accounting | Definitional arithmetic (4 + 4 + 8 bytes/param) | exact | ✅ enforced |
 | `measured_activations.json` | `saved_tensors_hooks` on the meta device | ±0.5 on each coefficient | ✅ enforced |
-| Peak memory of a real run | `torch.cuda.max_memory_allocated()` | 25% | ⚠️ **not yet populated** |
+| `measured_cnn_activations.json` | `saved_tensors_hooks` on the meta device | exact | ✅ enforced |
+| LM-head retained bytes | `saved_tensors_hooks`, 5 shapes x 3 vocabularies | exact | ✅ enforced |
+| Peak memory of a real run | `torch.cuda.max_memory_allocated()` | 25% | ✅ 6 runs on a T4 |
 
 ## Activation coefficients — measured
 
@@ -54,6 +56,45 @@ the first run:
   absorbed into the linear coefficient silently. `test_measurement_fit_had_no_unexplained_constant`
   asserts the fitted constant stays at zero.
 
+## Vision models
+
+CNN activation memory has no closed form — it is the sum of every feature map, specific to
+each architecture. So the snapshot stores a measured per-sample figure instead, produced by
+`measure_cnn_activations.py` on the meta device (zero allocation, no GPU).
+
+Two invariants the cost model depends on are checked at measurement time rather than
+assumed: activations are linear in batch size, and scale with spatial area. Both hold for
+all eleven models.
+
+Worth knowing why this could not be derived: MobileNet-V2 has 3.5M parameters and *more*
+activation memory than VGG-16's 138M. Any formula keyed on parameter count would be badly
+wrong in both directions.
+
+## The LM head: measured and fitted, kept separate
+
+`cross_entropy` retains exactly **4.00 bytes per logit element** — one fp32 copy — measured
+across five shapes and three vocabularies. The head projection itself retains ~0.02, since
+its input is the hidden state already counted elsewhere.
+
+The peak is larger than what is retained, because the backward pass holds the logits
+gradient and the softmax workspace simultaneously, and forward-only capture cannot see
+that. That part is a **fitted** constant supported by two data points, kept in its own
+named constant so the weak evidence is visible.
+
+Sweeping it against the measured peaks lowers mean error monotonically all the way to
+18 bytes/element. That is the signature of absorbing a systematic under-estimate into
+whichever parameter scales with `b*s*vocab`, not of finding a true value — so it was left
+at the operation-count estimate rather than tuned to flatter six fixtures.
+
+## How stable are these measurements?
+
+An independent re-run on a fresh T4 reproduced all six peaks to within **0.51%**, and gave
+an identical 135 MiB CUDA context. Fragmentation across the real models came out at 10.5%,
+matching the shipped constant exactly.
+
+That matters for interpreting a future disagreement: measurement noise here is well under
+one percent, so a several-percent gap is a real modelling error rather than jitter.
+
 ## The remaining gap — and how to close it
 
 Two constants still cannot be measured without NVIDIA hardware: `CUDA_CONTEXT_BYTES` and
@@ -78,12 +119,24 @@ Pasting the file's contents straight into a cell works too.
 
 ### What it measures
 
+0. **Everything below in one run.** `--models` additionally validates the vision
+   activations against a real peak, sweeps the LM-head cost, and checks `VRAMGuard`.
+
 1. **CUDA context**, sampled three times — after `cuda.init()`, after the first matmul
    (which pulls in cuBLAS) and after the first convolution (cuDNN, the larger of the two).
    Computed as `(total - free)` from the driver minus what PyTorch has reserved, so it
    isolates memory that `torch.cuda.memory_allocated()` never sees.
 2. **Fragmentation**, as `max_memory_reserved / max_memory_allocated` across five shapes.
-3. **End-to-end peaks** for GPT-2, BERT and DistilBERT, emitted as ready-to-paste JSON.
+3. **End-to-end peaks** for GPT-2, BERT, DistilBERT and ResNet-50, emitted as
+   ready-to-paste JSON. ResNet-50 matters specifically: the CNN activation figures were
+   measured on the meta device and have never been checked against a real allocator.
+4. **An LM-head vocabulary sweep** — same tiny transformer body, vocabulary varied from
+   8k to 128k at two batch sizes. Holding the body constant makes the `b*s*vocab`
+   coefficient separable, which two data points could not do. The printed slope is the
+   per-logit cost with backward transients included; compare it against
+   `LM_HEAD_RETAINED_BYTES + LM_HEAD_BACKWARD_TRANSIENT_BYTES`.
+5. **`VRAMGuard` accuracy** — projection versus what a real ResNet-50 step actually used,
+   which is the runtime half of the same question.
 
 Two details that would otherwise corrupt the numbers, both handled:
 

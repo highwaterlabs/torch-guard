@@ -67,18 +67,20 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 
 ### Known gaps that came out of building it
 
-- [ ] **CNN activation memory is not modelled.** Vision entries in the snapshot carry
-      parameter counts only, so a ResNet estimate reports activations as unknown and
-      widens the interval. Needs measured feature-map sizes per architecture — the same
-      measurement problem as below.
+- [x] **CNN activation memory measured** for all eleven vision models, on the meta device
+      with no GPU — I had wrongly filed this as needing one. Batch-linearity and
+      area-scaling are verified at measurement time, not assumed.
 - [x] `CUDA_CONTEXT_BYTES` (135 MiB) and `FRAGMENTATION_FRACTION` (0.105) measured on a
       Tesla T4; end-to-end peaks recorded for GPT-2, BERT and DistilBERT. Mean absolute
       error against measured peaks is now 5.0%.
-- [ ] **Causal-LM loss temporaries are a floor.** GPT-2 at batch 8 x seq 256 is still 20%
-      under. The derived term (logits + fp32 upcast + log_softmax) does not capture
-      everything real loss implementations allocate — HF's `shift_logits` contiguous copy
-      is one candidate. Needs a vocab/batch sweep to pin down; two data points is not
-      enough to fit a coefficient, and guessing one would defeat the purpose.
+- [x] **LM-head retained bytes measured**: exactly 4.00 per logit element, across five
+      shapes and three vocabularies, precision-independent. Split out from the fitted
+      backward-transient part so the evidence for each is visible.
+- [ ] **The LM-head backward transient is still fitted on two points.** GPT-2 at batch 8 x
+      seq 256 remains ~20% under. Sweeping the constant lowers mean error monotonically to
+      18 bytes/element, which means it is absorbing a systematic under-estimate rather
+      than converging — so it was deliberately not tuned. Needs measured peaks across a
+      vocab/batch sweep on real hardware.
 - [ ] **Calibration covers one GPU.** `CUDA_CONTEXT_BYTES` is a single T4 data point;
       `hardware.Gpu.context_mib` holds per-card overrides as more arrive. An A100/H100
       run would be the most valuable next measurement.
