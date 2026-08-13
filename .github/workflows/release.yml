@@ -1,0 +1,81 @@
+name: Release
+
+# Publishes to PyPI when a v* tag is pushed. Uses Trusted Publishing (OIDC), so there is
+# no API token stored anywhere — PyPI verifies the workflow identity directly.
+#
+# A manual run builds and checks the artifacts without publishing, so the pipeline can be
+# exercised safely before a real release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]" build twine
+
+      # Publishing broken code is not recoverable: a PyPI version number can never be
+      # reused, even after deletion.
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Lint torch-guard with torch-guard
+        run: torch-guard check src/ --fail-on warning
+
+      - name: Tag must match the packaged version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python - <<'PY'
+          import os, sys, tomllib
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          with open("pyproject.toml", "rb") as f:
+              version = tomllib.load(f)["project"]["version"]
+          if tag != version:
+              sys.exit(f"tag v{tag} does not match pyproject version {version}")
+          print(f"tag and version agree: {version}")
+          PY
+
+      - name: Build
+        run: python -m build
+
+      - name: Check metadata renders on PyPI
+        run: python -m twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    # Only a tag publishes. A manual run stops after build, so the pipeline can be
+    # rehearsed without burning a version number.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/torch-guard
+    permissions:
+      id-token: write        # required for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

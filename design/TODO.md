@@ -128,16 +128,24 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 
 ## Cross-cutting
 
-- [ ] **Name + org, before anything is published.** `torch-guard` is free on PyPI and
-      GitHub. `torchguard` (no hyphen) is an active package in the same niche, so the two
-      will compete for searches permanently — last cheap moment to change. Name the org
-      separately from the package either way. See RFC 0002 §7.
-- [ ] Create the public GitHub org and repo. The private `torch-guard-cloud` repo is not
-      needed until there is commercial code for it.
-- [ ] Put a short "what stays free" section in the public README, per RFC 0002 §6.
-- [ ] Make `design/` tracked in the public repo (drop it from .gitignore) now that it is
-      public — and check the README's `design/` links resolve on GitHub.
-- [ ] Nothing is committed yet; `git init` has been run but the tree is unstaged
+- [x] Name and org settled: package `torch-guard`, org `highwaterlabs`, deliberately
+      distinct so the company is not named after another project's trademark. The
+      `torchguard` collision turned out to be noise — 38 downloads a month and a project
+      URL that 404s.
+- [x] Public repo live at `highwaterlabs/torch-guard`, MIT, CI green. The private
+      `torch-guard-cloud` repo is still not needed; RFC 0002 lives there when it exists.
+- [x] "What stays free" section in the README, per RFC 0002 §6.
+- [x] `design/` is tracked and public; README links verified.
+- [x] Committed and pushed; README split into `docs/` and rewritten (PRs #1, #2).
+
+- [ ] **Publish 0.1.0 to PyPI.** Workflow and metadata are ready; needs the Trusted
+      Publisher configured on PyPI and a `v0.1.0` tag pushed. Until then the README's
+      `pip install torch-guard` is a promise the project cannot keep.
+- [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-guard-cloud/`.
+- [ ] Repo presentation: description, topics (`pytorch`, `linter`, `static-analysis`,
+      `mlops`, `cuda`), and a logo — every comparable project except Pydantic leads with one.
+- [ ] The **Tests: 294 passing** badge in the README is a hardcoded shields.io label. It
+      will drift the moment a test is added; wire it to something real or drop it.
 - [ ] Snapshot refresh process: how is `archdb` regenerated, and on what cadence?
 - [x] **Stress-tested against torch's own source** (2285 files). False-positive rate after
       fixes: **0.0033 findings/file** — 3 findings in 900 files, all "true but intentional"
