@@ -9,16 +9,16 @@ import warnings
 
 import pytest
 
-from torch_guard.vram import archdb, hardware
-from torch_guard.vram.costmodel import (
+from torch_preflight.vram import archdb, hardware
+from torch_preflight.vram.costmodel import (
     estimate,
     params_from_transformer_shape,
     transformer_activation_bytes,
 )
-from torch_guard.vram.extract import extract_from_source
-from torch_guard.vram.providers import resolve_profile, static
-from torch_guard.vram.solver import MAX_STACK, solve
-from torch_guard.vram.types import (
+from torch_preflight.vram.extract import extract_from_source
+from torch_preflight.vram.providers import resolve_profile, static
+from torch_preflight.vram.solver import MAX_STACK, solve
+from torch_preflight.vram.types import (
     GIB,
     Confidence,
     OptimizerKind,
@@ -38,13 +38,13 @@ SEVEN_B = 6_738_415_616
 def test_base_install_never_imports_torch():
     """The invariant that keeps the default install light (RFC 0001 §4).
 
-    One careless top-level ``import torch`` would silently make `pip install torch-guard`
+    One careless top-level ``import torch`` would silently make `pip install torch-preflight`
     pull in gigabytes. Normal tests cannot catch it, so this asserts it directly.
     """
     script = (
-        "import sys, torch_guard;"
-        "from torch_guard import vram;"
-        "torch_guard.check_source('t.py', 'x = 1');"
+        "import sys, torch_preflight;"
+        "from torch_preflight import vram;"
+        "torch_preflight.check_source('t.py', 'x = 1');"
         "vram.estimate_script('t.py', 'x = 1');"
         "assert 'torch' not in sys.modules, 'base install pulled in torch';"
         "assert 'huggingface_hub' not in sys.modules, 'base install pulled in hub'"
@@ -405,7 +405,7 @@ def test_inference_script_detected_by_absence_of_backward():
 
 
 def test_unresolvable_model_argument_is_reported_not_guessed():
-    from torch_guard.vram import estimate_script
+    from torch_preflight.vram import estimate_script
 
     report = estimate_script(
         "t.py",
@@ -476,8 +476,8 @@ def train(device):
 
 
 def _tg010_codes(source, **cfg_kwargs):
-    from torch_guard.config import Config
-    from torch_guard.engine import check_source
+    from torch_preflight.config import Config
+    from torch_preflight.engine import check_source
 
     diagnostics, _ = check_source("t.py", textwrap.dedent(source), Config(**cfg_kwargs))
     return [d for d in diagnostics if d.code == "TG010"]
@@ -512,7 +512,7 @@ def test_tg010_silent_on_an_unknown_gpu():
 
 def test_tg010_never_reaches_the_network(monkeypatch):
     """`check` must stay hermetic: no hub lookup, ever."""
-    from torch_guard.vram.providers import hub
+    from torch_preflight.vram.providers import hub
 
     def explode(*args, **kwargs):
         raise AssertionError("check reached the network")

@@ -26,11 +26,11 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
-      - name: Lint torch-guard with torch-guard
-        run: torch-guard check src/ --fail-on warning
+      - name: Lint torch-preflight with torch-preflight
+        run: torch-preflight check src/ --fail-on warning
 
   # The default install must stay light: no torch, no huggingface_hub. A stray top-level
-  # import would silently turn `pip install torch-guard` into a multi-gigabyte download,
+  # import would silently turn `pip install torch-preflight` into a multi-gigabyte download,
   # and the matrix above cannot catch it because it installs the dev extra.
   base-install:
     runs-on: ubuntu-latest
@@ -56,9 +56,9 @@ jobs:
       - name: Assert nothing imports them at runtime
         run: |
           python - <<'PY'
-          import sys, torch_guard
-          from torch_guard import vram
-          torch_guard.check_source("t.py", "x = 1")
+          import sys, torch_preflight
+          from torch_preflight import vram
+          torch_preflight.check_source("t.py", "x = 1")
           vram.estimate_script("t.py", "x = 1")
           vram.estimate_script("t.py", 'm = AutoModel.from_pretrained("gpt2")', gpu="a100-80gb")
           for name in ("torch", "huggingface_hub"):
@@ -69,16 +69,16 @@ jobs:
       - name: Estimator works, and its exit codes mean what we say they mean
         run: |
           set -e
-          torch-guard gpus > /dev/null
+          torch-preflight gpus > /dev/null
 
           # A run that fits must exit 0.
-          torch-guard estimate --model gpt2 --gpu a100-80gb \
+          torch-preflight estimate --model gpt2 --gpu a100-80gb \
             --batch-size 4 --seq-len 512 > /dev/null
 
           # A run that cannot fit must exit 1, because CI is meant to fail on it. A 7B
           # full fine-tune in fp32 genuinely does not fit an 80GB A100 — the first
           # version of this step used exactly that command and was surprised by it.
-          if torch-guard estimate --model llama-2-7b --gpu a100-80gb \
+          if torch-preflight estimate --model llama-2-7b --gpu a100-80gb \
                --batch-size 1 --seq-len 512 > /dev/null; then
             echo "expected exit 1 for a projected OOM, got 0"; exit 1
           fi

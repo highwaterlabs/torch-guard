@@ -3,7 +3,7 @@
 Before renting the GPU, ask whether the run fits:
 
 ```bash
-$ torch-guard estimate finetune.py --gpu a100-80gb
+$ torch-preflight estimate finetune.py --gpu a100-80gb
 
 Model      llama-2-7b  (arch-snapshot)   6.74 B params
 Config     amp · AdamW · batch 4 · seq 2048
@@ -42,10 +42,10 @@ The model, batch size, sequence length, precision, optimizer and sharding strate
 read out of the script — nothing is imported or executed. Override any of them:
 
 ```bash
-torch-guard estimate train.py --gpu rtx4090 --batch-size 1 --seq-len 512 --dtype pure-bf16
-torch-guard estimate --model llama-2-7b --gpu 8xa100-80gb --sharding zero-3
-torch-guard estimate --params 13B --gpu-memory 48GiB
-torch-guard gpus --instances        # every known GPU and cloud instance
+torch-preflight estimate train.py --gpu rtx4090 --batch-size 1 --seq-len 512 --dtype pure-bf16
+torch-preflight estimate --model llama-2-7b --gpu 8xa100-80gb --sharding zero-3
+torch-preflight estimate --params 13B --gpu-memory 48GiB
+torch-preflight gpus --instances        # every known GPU and cloud instance
 ```
 
 Cloud instance names work directly: `--gpu p4de.24xlarge`, `--gpu ml.p5.48xlarge`,
@@ -54,9 +54,9 @@ Cloud instance names work directly: `--gpu p4de.24xlarge`, `--gpu ml.p5.48xlarge
 ## Install extras
 
 ```bash
-pip install torch-guard              # linter + static VRAM estimation, no torch needed
-pip install "torch-guard[hub]"       # + look up unknown architectures on the HF hub
-pip install "torch-guard[vram]"      # + exact meta-device profiling
+pip install torch-preflight              # linter + static VRAM estimation, no torch needed
+pip install "torch-preflight[hub]"       # + look up unknown architectures on the HF hub
+pip install "torch-preflight[vram]"      # + exact meta-device profiling
 ```
 
 Extras add *dependencies only* — the wheel is byte-identical either way, and the base
@@ -65,10 +65,10 @@ install never imports torch.
 ## Custom architectures
 
 Models outside the bundled snapshot can be measured exactly, with `pip install
-"torch-guard[vram]"`:
+"torch-preflight[vram]"`:
 
 ```bash
-torch-guard estimate --model mypkg.models:build_gpt \
+torch-preflight estimate --model mypkg.models:build_gpt \
     --model-args layers=24 --model-args hidden=1024 \
     --gpu a100-80gb --batch-size 8 --seq-len 1024 --dtype amp
 ```
@@ -78,7 +78,7 @@ required** — so parameter counts are exact rather than estimated, and a forwar
 `saved_tensors_hooks` captures precisely the tensors autograd retains for backward. That
 is activation memory by definition, not by formula.
 
-This path imports and executes your code, so it is opt-in and explicit. `torch-guard check`
+This path imports and executes your code, so it is opt-in and explicit. `torch-preflight check`
 never reaches it.
 
 ## As a CI gate
@@ -87,7 +87,7 @@ Declare the hardware your team trains on and TG010 fails the build when a config
 fit it:
 
 ```toml
-[tool.torch-guard]
+[tool.torch-preflight]
 target_gpu = "rtx4090"
 ```
 
@@ -110,7 +110,7 @@ captures the tensors autograd actually retains via `saved_tensors_hooks` and fit
 against sequence length. It runs on the meta device, so it allocates zero bytes and needs
 no GPU. That measurement showed the published constants are a midpoint of two regimes —
 models with dropout retain three tensors of `b·a·s²` in the attention path, models without
-retain one — so torch-guard charges Llama-class models the cheaper rate they actually pay.
+retain one — so torch-preflight charges Llama-class models the cheaper rate they actually pay.
 
 The allocator constants are measured on a real GPU, and end-to-end projections are checked
 against measured peaks from actual training steps:
@@ -129,7 +129,7 @@ Mean absolute error 5.0%, on a Tesla T4. Regenerate with
 
 Every estimate carries an interval, and the verdict bands account for it — there is no
 fabricated "95% failure risk" probability, because there is no data to calibrate one
-against. If the model cannot be identified, torch-guard reports `UNKNOWN` rather than
+against. If the model cannot be identified, torch-preflight reports `UNKNOWN` rather than
 guessing a parameter count.
 
 **Known gaps**, tracked in [design/TODO.md](../design/TODO.md):
@@ -152,14 +152,14 @@ The estimator answers "will this fit?" before the job is submitted. `VRAMGuard` 
 *inside* the process, against the model that actually exists:
 
 ```python
-from torch_guard import VRAMGuard
+from torch_preflight import VRAMGuard
 
 with VRAMGuard(model, optimizer=optimizer, batch_size=32, seq_len=2048):
     train()
 ```
 
 ```
-VramRiskError: torch-guard: this configuration is projected to need 701 MiB
+VramRiskError: torch-preflight: this configuration is projected to need 701 MiB
 (456 MiB-946 MiB) on limit 256MiB, which has 0.2 GiB usable. Verdict: CERTAIN_OOM.
   breakdown: weights 128 MiB, gradients 128 MiB, optimizer state 256 MiB, ...
   smallest change that fits: 8-bit AdamW (bitsandbytes) + pure bf16 weights
@@ -171,6 +171,6 @@ only when the run cannot fit even at the optimistic end of the interval** — an
 certain is a warning, because aborting a training job on a guess is worse than the OOM it
 was trying to prevent. `strict=True` opts into raising on likely failures too.
 
-Needs `pip install "torch-guard[vram]"`. On exit, `guard.measured_peak` and
+Needs `pip install "torch-preflight[vram]"`. On exit, `guard.measured_peak` and
 `guard.accuracy` compare the projection against what the run actually used.
 

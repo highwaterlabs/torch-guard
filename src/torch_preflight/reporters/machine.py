@@ -134,9 +134,9 @@ def render_sarif(result: Result) -> str:
                 {
                     "tool": {
                         "driver": {
-                            "name": "torch-guard",
+                            "name": "torch-preflight",
                             "version": __version__,
-                            "informationUri": "https://github.com/highwaterlabs/torch-guard",
+                            "informationUri": "https://github.com/highwaterlabs/torch-preflight",
                             "rules": rules,
                         }
                     },

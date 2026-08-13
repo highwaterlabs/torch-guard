@@ -18,13 +18,13 @@ from .diagnostics import Diagnostic, Severity
 from .fixer import apply_fixes
 from .rules import RuleDispatcher, all_rules
 
-#: ``# noqa``, ``# noqa: TG001,TG002``, ``# torch-guard: ignore[TG003]``
+#: ``# noqa``, ``# noqa: TG001,TG002``, ``# torch-preflight: ignore[TG003]``
 _SUPPRESS_RE = re.compile(
-    r"#\s*(?:noqa|torch-guard\s*:\s*ignore)(?:\s*[:\[]\s*(?P<codes>[A-Za-z0-9,\s]+?)\s*\]?)?"
+    r"#\s*(?:noqa|torch-preflight\s*:\s*ignore)(?:\s*[:\[]\s*(?P<codes>[A-Za-z0-9,\s]+?)\s*\]?)?"
     r"(?:\s|$|#)",
     re.IGNORECASE,
 )
-_SKIP_FILE_RE = re.compile(r"#\s*torch-guard\s*:\s*skip[-_]file", re.IGNORECASE)
+_SKIP_FILE_RE = re.compile(r"#\s*torch-preflight\s*:\s*skip[-_]file", re.IGNORECASE)
 
 _ALL = "*"
 

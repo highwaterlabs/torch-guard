@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to torch-guard are recorded here. This project follows
+All notable changes to torch-preflight are recorded here. This project follows
 [semantic versioning](https://semver.org/).
 
 ## [0.1.0] — unreleased
@@ -20,11 +20,11 @@ First release.
   carries a graph rather than on what the line looks like
 - Autofixes as concrete syntax tree rewrites, preserving formatting and comments
 - Terminal, JSON, SARIF and GitHub annotation output
-- `# noqa: TG001`, `# torch-guard: ignore[...]` and `# torch-guard: skip-file` suppression
+- `# noqa: TG001`, `# torch-preflight: ignore[...]` and `# torch-preflight: skip-file` suppression
 
 ### VRAM estimation
 
-- `torch-guard estimate` projects peak memory from a training script without importing or
+- `torch-preflight estimate` projects peak memory from a training script without importing or
   executing it
 - Remediation solver reporting which change would make a run fit
 - 41 bundled architectures, 23 GPUs, 34 cloud instance types

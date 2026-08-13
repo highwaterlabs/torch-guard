@@ -5,7 +5,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest
 ```
 
-Adding a rule: create `src/torch_guard/rules/tg0NN_name.py`, subclass `Rule`, decorate with
+Adding a rule: create `src/torch_preflight/rules/tg0NN_name.py`, subclass `Rule`, decorate with
 `@register`, import it in `rules/__init__.py`, then add cases to `tests/test_rules.py` —
 at least one that must fire and one that must stay quiet.
 

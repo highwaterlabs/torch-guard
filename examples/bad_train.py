@@ -1,6 +1,6 @@
-"""A training script containing every bug torch-guard currently detects.
+"""A training script containing every bug torch-preflight currently detects.
 
-Run ``torch-guard check examples/bad_train.py`` to see the report.
+Run ``torch-preflight check examples/bad_train.py`` to see the report.
 """
 
 import torch

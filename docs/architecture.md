@@ -18,7 +18,7 @@ source.py
 ```
 
 The provenance pass is the part a syntax-only linter cannot replicate. `losses.append(x)`
-is only a leak if `x` is grad-bearing, so torch-guard tracks where `x` came from —
+is only a leak if `x` is grad-bearing, so torch-preflight tracks where `x` came from —
 across assignments, arithmetic, tensor methods and function scopes — and stays quiet when
 the value was detached or the code is already inside `torch.no_grad()`.
 

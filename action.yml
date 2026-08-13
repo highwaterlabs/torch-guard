@@ -1,4 +1,4 @@
-name: torch-guard
+name: torch-preflight
 description: Static analysis for PyTorch training code - VRAM leaks, convergence bugs, GPU stalls.
 author: Himanshu Janbandhu
 
@@ -36,7 +36,7 @@ inputs:
     required: false
     default: ""
   python-version:
-    description: Python version used to run torch-guard.
+    description: Python version used to run torch-preflight.
     required: false
     default: "3.11"
 
@@ -52,11 +52,11 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install torch-guard
+    - name: Install torch-preflight
       shell: bash
-      run: python -m pip install --disable-pip-version-check "torch-guard${{ inputs.version }}"
+      run: python -m pip install --disable-pip-version-check "torch-preflight${{ inputs.version }}"
 
-    - name: Run torch-guard
+    - name: Run torch-preflight
       id: run
       shell: bash
       run: |
@@ -66,9 +66,9 @@ runs:
 
         set +e
         if [ -n "${{ inputs.output }}" ]; then
-          torch-guard "${args[@]}" > "${{ inputs.output }}"
+          torch-preflight "${args[@]}" > "${{ inputs.output }}"
         else
-          torch-guard "${args[@]}"
+          torch-preflight "${args[@]}"
         fi
         code=$?
         set -e

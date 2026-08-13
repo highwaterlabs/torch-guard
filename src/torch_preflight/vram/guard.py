@@ -1,6 +1,6 @@
 """``VRAMGuard`` — fail at step 0 instead of OOM at step 400.
 
-    from torch_guard import VRAMGuard
+    from torch_preflight import VRAMGuard
 
     with VRAMGuard(model, optimizer=optimizer, batch_size=32, seq_len=2048):
         train()
@@ -248,7 +248,7 @@ class VRAMGuard:
     def _describe(self, report: VramReport) -> str:
         low, high = report.interval
         lines = [
-            f"torch-guard: this configuration is projected to need "
+            f"torch-preflight: this configuration is projected to need "
             f"{format_bytes(report.total)} "
             f"({format_bytes(low)}-{format_bytes(high)}) on {report.gpu.name}, "
             f"which has {report.gpu.usable_gib:.1f} GiB usable. Verdict: {report.band.value}.",

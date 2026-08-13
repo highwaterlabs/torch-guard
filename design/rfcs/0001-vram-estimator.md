@@ -2,7 +2,7 @@
 
 **Status:** Implemented — phases 1, 2 and 3 complete
 **Created:** 2026-08-12
-**Affects:** new `torch_guard.vram` subpackage, new `estimate` command, new rule TG010, packaging
+**Affects:** new `torch_preflight.vram` subpackage, new `estimate` command, new rule TG010, packaging
 
 ---
 
@@ -13,7 +13,7 @@ config is wrong — batch size too large, AdamW in fp32, no gradient checkpointi
 job dies with CUDA OOM. Sometimes immediately, sometimes forty minutes in once activations
 peak. Either way they have paid for the GPU and lost the wall-clock time.
 
-torch-guard already reads the training script. It should be able to say *before the job
+torch-preflight already reads the training script. It should be able to say *before the job
 starts* whether the configuration fits the target hardware, and if not, what to change.
 
 ## 2. Goals / non-goals
@@ -67,7 +67,7 @@ label and the `source` field change.
 ### Proposed layout
 
 ```
-src/torch_guard/vram/
+src/torch_preflight/vram/
   hardware.py          # GPU + cloud instance database              no deps
   costmodel.py         # ModelProfile + RunConfig -> VramReport      no deps
   solver.py            # "what change makes it fit"                  no deps
@@ -83,14 +83,14 @@ src/torch_guard/vram/
 
 ## 4. Packaging: one wheel, optional dependencies
 
-`pip install torch-guard` and `pip install torch-guard[vram]` install the **byte-identical
+`pip install torch-preflight` and `pip install torch-preflight[vram]` install the **byte-identical
 wheel**. All code ships always. An extra adds only *dependencies*.
 
 ```toml
 [project.optional-dependencies]
 hub  = ["huggingface_hub>=0.20"]
 vram = ["torch>=2.1"]
-all  = ["torch-guard[hub,vram]"]
+all  = ["torch-preflight[hub,vram]"]
 ```
 
 Code that needs an optional dependency imports it **lazily, inside the function**:
@@ -104,7 +104,7 @@ def _try_meta(target):
     return profile_with_meta_device(target)
 ```
 
-**Invariant:** no module reachable from `import torch_guard` may import torch,
+**Invariant:** no module reachable from `import torch_preflight` may import torch,
 `huggingface_hub`, or anything else outside base dependencies at top level.
 
 **Enforcement** (this is not optional — one careless import silently breaks the light
@@ -113,8 +113,8 @@ install, and normal CI will not catch it because CI has everything installed):
 ```python
 def test_base_install_never_imports_torch():
     subprocess.run([sys.executable, "-c",
-        "import sys, torch_guard;"
-        "torch_guard.check_source('t.py', 'x = 1');"
+        "import sys, torch_preflight;"
+        "torch_preflight.check_source('t.py', 'x = 1');"
         "assert 'torch' not in sys.modules"], check=True)
 ```
 
@@ -129,7 +129,7 @@ rate limits. Therefore:
   package (tens of KB). Zero network, zero deps, covers the common case.
 - The `[hub]` extra enables live lookup only for architectures missing from the snapshot,
   cached on disk.
-- Live lookup is **never** triggered by `torch-guard check`. Only by explicit `estimate`.
+- Live lookup is **never** triggered by `torch-preflight check`. Only by explicit `estimate`.
 
 ## 5. Model resolution
 
@@ -220,9 +220,9 @@ Pure arithmetic on the cost model, so it ships in the free tier.
 ## 8. Surface area
 
 ```bash
-torch-guard estimate train.py --gpu rtx4090
-torch-guard estimate --model mypkg.models:build_gpt --batch-size 8 --seq-len 4096
-torch-guard gpus
+torch-preflight estimate train.py --gpu rtx4090
+torch-preflight estimate --model mypkg.models:build_gpt --batch-size 8 --seq-len 4096
+torch-preflight gpus
 ```
 
 Every extracted field is overridable: `--batch-size --seq-len --dtype --optimizer
@@ -231,7 +231,7 @@ Every extracted field is overridable: `--batch-size --seq-len --dtype --optimize
 **TG010** turns it into a CI gate through the existing `check` path:
 
 ```toml
-[tool.torch-guard]
+[tool.torch-preflight]
 target_gpu = "rtx4090"     # check now fails when a confident estimate exceeds this
 ```
 

@@ -1,12 +1,12 @@
 # design/
 
-Working notes for building torch-guard. Not user documentation — [README.md](../README.md)
+Working notes for building torch-preflight. Not user documentation — [README.md](../README.md)
 is the user-facing doc, and nothing in here ships in the wheel.
 
 **This directory is public**, and deliberately so: the RFCs and spike write-ups are the
 evidence behind the numbers the tool prints, which is most of why anyone should trust an
-OOM prediction. Commercial design notes live in the private `torch-guard-cloud` repo
-instead, in the private `torch-guard-cloud` repo — including the RFC that defines the
+OOM prediction. Commercial design notes live in the private `torch-preflight-cloud` repo
+instead, in the private `torch-preflight-cloud` repo — including the RFC that defines the
 free/paid boundary, which is itself on the private side of it.
 
 | Folder | What goes in it | Lifetime |

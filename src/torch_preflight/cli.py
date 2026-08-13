@@ -37,10 +37,10 @@ def _split_codes(values: Optional[Sequence[str]]) -> List[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="torch-guard",
+        prog="torch-preflight",
         description="Static analyzer for PyTorch training code.",
     )
-    parser.add_argument("--version", action="version", version=f"torch-guard {__version__}")
+    parser.add_argument("--version", action="version", version=f"torch-preflight {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     check = subparsers.add_parser("check", help="analyze files for PyTorch anti-patterns")
@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         "estimate", help="project peak VRAM for a training script before you launch it"
     )
     est.add_argument("path", nargs="?", help="training script to read the config from")
-    est.add_argument("--gpu", help="target GPU or cloud instance (see `torch-guard gpus`)")
+    est.add_argument("--gpu", help="target GPU or cloud instance (see `torch-preflight gpus`)")
     est.add_argument("--gpu-memory", help="explicit capacity for unlisted hardware, e.g. 48GiB")
     est.add_argument("--model",
                      help="architecture name (llama-2-7b) or entry point (pkg.mod:factory)")
@@ -111,7 +111,7 @@ def _run_check(args: argparse.Namespace) -> int:
     paths = [Path(p) for p in (args.paths or ["."])]
     for path in paths:
         if not path.exists():
-            print(f"torch-guard: path does not exist: {path}", file=sys.stderr)
+            print(f"torch-preflight: path does not exist: {path}", file=sys.stderr)
             return EXIT_ERROR
 
     try:
@@ -125,12 +125,12 @@ def _run_check(args: argparse.Namespace) -> int:
             target_gpu=args.target_gpu,
         )
     except (OSError, ValueError) as exc:
-        print(f"torch-guard: {exc}", file=sys.stderr)
+        print(f"torch-preflight: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     unknown = (cfg.select or set()) | cfg.ignore
     for code in sorted(unknown - set(RULES)):
-        print(f"torch-guard: warning: unknown rule code {code}", file=sys.stderr)
+        print(f"torch-preflight: warning: unknown rule code {code}", file=sys.stderr)
 
     want_fix = args.fix or args.diff
     result = check_paths(
@@ -175,7 +175,7 @@ def _print_diff(result) -> None:
 def _run_explain(code: str) -> int:
     rule = RULES.get(code.upper())
     if rule is None:
-        print(f"torch-guard: unknown rule {code}", file=sys.stderr)
+        print(f"torch-preflight: unknown rule {code}", file=sys.stderr)
         return EXIT_ERROR
 
     console = Console()
@@ -236,26 +236,26 @@ def _run_estimate(args: argparse.Namespace) -> int:
     try:
         model_args = parse_model_args(args.model_args)
     except EntryPointError as exc:
-        print(f"torch-guard: {exc}", file=sys.stderr)
+        print(f"torch-preflight: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     gpu_memory = None
     if args.gpu_memory:
         gpu_memory = hardware.parse_memory(args.gpu_memory)
         if gpu_memory is None:
-            print(f"torch-guard: could not parse --gpu-memory {args.gpu_memory!r}",
+            print(f"torch-preflight: could not parse --gpu-memory {args.gpu_memory!r}",
                   file=sys.stderr)
             return EXIT_ERROR
 
     if not args.path and not (args.model or args.params):
-        print("torch-guard: give a script to read, or --model/--params", file=sys.stderr)
+        print("torch-preflight: give a script to read, or --model/--params", file=sys.stderr)
         return EXIT_ERROR
 
     try:
         if args.params:
             count = _parse_params(args.params)
             if count is None:
-                print(f"torch-guard: could not parse --params {args.params!r}",
+                print(f"torch-preflight: could not parse --params {args.params!r}",
                       file=sys.stderr)
                 return EXIT_ERROR
             profile = static.from_param_count(count, name=args.model or "custom")
@@ -270,7 +270,7 @@ def _run_estimate(args: argparse.Namespace) -> int:
         elif args.path:
             path = Path(args.path)
             if not path.is_file():
-                print(f"torch-guard: no such file: {path}", file=sys.stderr)
+                print(f"torch-preflight: no such file: {path}", file=sys.stderr)
                 return EXIT_ERROR
             report = estimate_script(
                 str(path),
@@ -297,7 +297,7 @@ def _run_estimate(args: argparse.Namespace) -> int:
                 profile, config, gpu=args.gpu, gpu_memory=gpu_memory
             )
     except (OSError, ValueError) as exc:
-        print(f"torch-guard: {exc}", file=sys.stderr)
+        print(f"torch-preflight: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     if args.format == "json":
@@ -337,7 +337,7 @@ def _run_gpus(args: argparse.Namespace) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
-    # ``torch-guard ./src`` is shorthand for ``torch-guard check ./src``.
+    # ``torch-preflight ./src`` is shorthand for ``torch-preflight check ./src``.
     if argv and argv[0] not in SUBCOMMANDS and not argv[0].startswith("-"):
         argv.insert(0, "check")
 

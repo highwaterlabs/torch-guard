@@ -20,7 +20,7 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [x] `vram/extract.py` — RunConfig from the CST, with per-field provenance
 - [x] `vram/solver.py` — remediation search with mutual-exclusion groups and a capped
       greedy stack
-- [x] `torch-guard estimate` / `torch-guard gpus`
+- [x] `torch-preflight estimate` / `torch-preflight gpus`
 - [x] Risk banding with error intervals; no fabricated probability
 - [x] TG010, gated on `target_gpu`, silent at low confidence, never touches the network
 - [x] `tests/calibration/` — parameter formula enforced to 3% against published counts
@@ -63,7 +63,7 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       - `dist_autograd_test.py:2086,2098` — TG001, a dict deliberately chaining
         graph-attached tensors across ranks
 
-      Reproduce with: `torch-guard check <site-packages>/torch -f json`
+      Reproduce with: `torch-preflight check <site-packages>/torch -f json`
 
 ### Known gaps that came out of building it
 
@@ -120,7 +120,7 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       live model, inferring optimizer kind and precision from the objects themselves.
       Raises only on `CERTAIN_OOM`; anything less certain warns, because aborting a job on
       a guess is worse than the OOM it would prevent. `strict=True` opts into raising.
-      Exported lazily from `torch_guard` so the base install still never imports torch.
+      Exported lazily from `torch_preflight` so the base install still never imports torch.
 - [x] Verification against `torch.cuda.max_memory_allocated()` on exit, exposed as
       `guard.measured_peak` and `guard.accuracy`.
 - [ ] Feed real `guard.accuracy` measurements back into the calibration fixtures — needs a
@@ -128,20 +128,21 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 
 ## Cross-cutting
 
-- [x] Name and org settled: package `torch-guard`, org `highwaterlabs`, deliberately
-      distinct so the company is not named after another project's trademark. The
-      `torchguard` collision turned out to be noise — 38 downloads a month and a project
-      URL that 404s.
-- [x] Public repo live at `highwaterlabs/torch-guard`, MIT, CI green. The private
-      `torch-guard-cloud` repo is still not needed; RFC 0002 lives there when it exists.
+- [x] Name and org settled: package `torch-preflight`, org `highwaterlabs`, deliberately
+      distinct so the company is not named after another project's trademark.
+      `torch-guard` had to be abandoned: PyPI rejects names that collide after separators
+      are stripped, and it normalises to the existing `torchguard`. Exact-name
+      availability is not registerability — see IDEAS.md.
+- [x] Public repo live at `highwaterlabs/torch-preflight`, MIT, CI green. The private
+      `torch-preflight-cloud` repo is still not needed; RFC 0002 lives there when it exists.
 - [x] "What stays free" section in the README, per RFC 0002 §6.
 - [x] `design/` is tracked and public; README links verified.
 - [x] Committed and pushed; README split into `docs/` and rewritten (PRs #1, #2).
 
 - [ ] **Publish 0.1.0 to PyPI.** Workflow and metadata are ready; needs the Trusted
       Publisher configured on PyPI and a `v0.1.0` tag pushed. Until then the README's
-      `pip install torch-guard` is a promise the project cannot keep.
-- [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-guard-cloud/`.
+      `pip install torch-preflight` is a promise the project cannot keep.
+- [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-preflight-cloud/`.
 - [ ] Repo presentation: description, topics (`pytorch`, `linter`, `static-analysis`,
       `mlops`, `cuda`), and a logo — every comparable project except Pydantic leads with one.
 - [ ] The **Tests: 294 passing** badge in the README is a hardcoded shields.io label. It

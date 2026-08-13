@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "torch-guard"
+name = "torch-preflight"
 version = "0.1.0"
 description = "Static analyzer for PyTorch training code: catches VRAM leaks, silent convergence bugs, and GPU pipeline stalls before you pay for the run."
 readme = "README.md"
@@ -35,22 +35,22 @@ dependencies = [
 # Extras add dependencies only — the wheel is byte-identical either way (RFC 0001 §4).
 hub = ["huggingface_hub>=0.20"]      # live architecture lookup for `estimate --online`
 vram = ["torch>=2.1"]                # exact meta-device profiling (phase 2)
-all = ["torch-guard[hub,vram]"]
+all = ["torch-preflight[hub,vram]"]
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.urls]
-Homepage = "https://github.com/highwaterlabs/torch-guard"
-Documentation = "https://github.com/highwaterlabs/torch-guard/tree/main/docs"
-Source = "https://github.com/highwaterlabs/torch-guard"
-Changelog = "https://github.com/highwaterlabs/torch-guard/blob/main/CHANGELOG.md"
-Issues = "https://github.com/highwaterlabs/torch-guard/issues"
+Homepage = "https://github.com/highwaterlabs/torch-preflight"
+Documentation = "https://github.com/highwaterlabs/torch-preflight/tree/main/docs"
+Source = "https://github.com/highwaterlabs/torch-preflight"
+Changelog = "https://github.com/highwaterlabs/torch-preflight/blob/main/CHANGELOG.md"
+Issues = "https://github.com/highwaterlabs/torch-preflight/issues"
 
 [project.scripts]
-torch-guard = "torch_guard.cli:main"
+torch-preflight = "torch_preflight.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/torch_guard"]
-artifacts = ["src/torch_guard/vram/data/*.json"]
+packages = ["src/torch_preflight"]
+artifacts = ["src/torch_preflight/vram/data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -58,6 +58,6 @@ testpaths = ["tests"]
 addopts = "-m 'not network'"
 markers = ["network: hits a real remote service (deselected by default)"]
 
-# torch-guard lints itself with defaults; example fixtures are intentionally buggy.
-[tool.torch-guard]
+# torch-preflight lints itself with defaults; example fixtures are intentionally buggy.
+[tool.torch-preflight]
 exclude = ["examples"]

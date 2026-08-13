@@ -6,10 +6,10 @@ import textwrap
 import pytest
 from conftest import analyze, codes
 
-from torch_guard.config import Config, load_config
-from torch_guard.diagnostics import Severity
-from torch_guard.engine import check_file, check_paths, check_source, iter_python_files
-from torch_guard.reporters import render_github, render_json, render_sarif
+from torch_preflight.config import Config, load_config
+from torch_preflight.diagnostics import Severity
+from torch_preflight.engine import check_file, check_paths, check_source, iter_python_files
+from torch_preflight.reporters import render_github, render_json, render_sarif
 
 LEAKY = """
 def train(model, loader, criterion, optimizer):
@@ -31,8 +31,8 @@ def train(model, loader, criterion, optimizer):
         "  # noqa",
         "  # noqa: TG001",
         "  # noqa: TG001, TG003",
-        "  # torch-guard: ignore",
-        "  # torch-guard: ignore[TG001]",
+        "  # torch-preflight: ignore",
+        "  # torch-preflight: ignore[TG001]",
     ],
 )
 def test_suppression_comments(suffix):
@@ -44,7 +44,7 @@ def test_suppression_is_code_specific():
 
 
 def test_skip_file():
-    assert codes("# torch-guard: skip-file\n" + LEAKY.format(suffix="")) == []
+    assert codes("# torch-preflight: skip-file\n" + LEAKY.format(suffix="")) == []
 
 
 # -------------------------------------------------------------------- config
@@ -70,11 +70,11 @@ def test_load_config_from_pyproject(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         textwrap.dedent(
             """
-            [tool.torch-guard]
+            [tool.torch-preflight]
             ignore = ["TG004"]
             fail_on = "warning"
 
-            [tool.torch-guard.severity]
+            [tool.torch-preflight.severity]
             TG001 = "note"
             """
         )
@@ -86,12 +86,12 @@ def test_load_config_from_pyproject(tmp_path):
 
 
 def test_load_config_from_standalone_file(tmp_path):
-    (tmp_path / ".torch-guard.toml").write_text('select = ["TG001"]\n')
+    (tmp_path / ".torch-preflight.toml").write_text('select = ["TG001"]\n')
     assert load_config(tmp_path).select == {"TG001"}
 
 
 def test_load_config_rejects_bad_severity(tmp_path):
-    (tmp_path / ".torch-guard.toml").write_text('[severity]\nTG001 = "critical"\n')
+    (tmp_path / ".torch-preflight.toml").write_text('[severity]\nTG001 = "critical"\n')
     with pytest.raises(ValueError, match="invalid severity"):
         load_config(tmp_path)
 
@@ -177,7 +177,7 @@ def test_sarif_report_is_valid():
     payload = json.loads(render_sarif(result))
     assert payload["version"] == "2.1.0"
     driver = payload["runs"][0]["tool"]["driver"]
-    from torch_guard.rules import RULES
+    from torch_preflight.rules import RULES
 
     assert {r["id"] for r in driver["rules"]} == set(RULES)
     assert payload["runs"][0]["results"][0]["ruleId"] == "TG001"
@@ -222,7 +222,7 @@ _LEAKY_FILE = textwrap.dedent(
 
 
 def _many_files(tmp_path, count):
-    from torch_guard.engine import PARALLEL_THRESHOLD
+    from torch_preflight.engine import PARALLEL_THRESHOLD
 
     assert count >= PARALLEL_THRESHOLD, "need enough files to trigger the parallel path"
     for i in range(count):

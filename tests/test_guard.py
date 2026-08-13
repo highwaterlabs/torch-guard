@@ -6,9 +6,9 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="VRAMGuard needs the [vram] extra")
 
-from torch_guard.vram.guard import VRAMGuard, VramRiskError  # noqa: E402
-from torch_guard.vram import hardware  # noqa: E402
-from torch_guard.vram.types import (  # noqa: E402
+from torch_preflight.vram.guard import VRAMGuard, VramRiskError  # noqa: E402
+from torch_preflight.vram import hardware  # noqa: E402
+from torch_preflight.vram.types import (  # noqa: E402
     GIB,
     Confidence,
     OptimizerKind,
@@ -26,15 +26,15 @@ def _guard_model(hidden=256):
 
 
 def test_vram_guard_is_lazily_exported():
-    """Available as `from torch_guard import VRAMGuard` without torch at import time."""
-    import torch_guard
+    """Available as `from torch_preflight import VRAMGuard` without torch at import time."""
+    import torch_preflight
 
-    assert torch_guard.VRAMGuard is VRAMGuard
-    assert "VRAMGuard" in dir(torch_guard)
+    assert torch_preflight.VRAMGuard is VRAMGuard
+    assert "VRAMGuard" in dir(torch_preflight)
 
 
 def test_guard_counts_live_parameters_exactly():
-    from torch_guard.vram.guard import profile_live_model
+    from torch_preflight.vram.guard import profile_live_model
 
     model = _guard_model(hidden=64)
     profile = profile_live_model(model)

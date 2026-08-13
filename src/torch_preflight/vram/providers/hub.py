@@ -1,6 +1,6 @@
 """Hub provider: resolve an architecture from its Hugging Face ``config.json``.
 
-Requires the ``[hub]`` extra. **Never reached from ``torch-guard check``** — only from an
+Requires the ``[hub]`` extra. **Never reached from ``torch-preflight check``** — only from an
 explicit ``estimate`` with network access enabled (RFC 0001 §4).
 
 ``huggingface_hub`` is imported inside the function, so importing this module on a machine

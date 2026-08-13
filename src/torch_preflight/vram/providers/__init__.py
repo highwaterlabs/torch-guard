@@ -14,7 +14,7 @@ from . import static
 
 #: Entry points need torch, which only the [vram] extra installs.
 _NEEDS_VRAM_EXTRA = (
-    "Profiling a Python entry point needs PyTorch: pip install 'torch-guard[vram]'. "
+    "Profiling a Python entry point needs PyTorch: pip install 'torch-preflight[vram]'. "
     "Alternatively pass a known architecture name (--model llama-2-7b) or --params."
 )
 
@@ -61,7 +61,7 @@ def resolve_profile(
             return ModelProfile.unknown(
                 reference,
                 f"{reference!r} is not in the bundled snapshot. Live lookup needs the hub "
-                f"extra: pip install 'torch-guard[hub]'",
+                f"extra: pip install 'torch-preflight[hub]'",
             )
         profile = hub.resolve(reference)
         if profile is not None:

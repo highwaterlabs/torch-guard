@@ -1,15 +1,15 @@
-- id: torch-guard
-  name: torch-guard
+- id: torch-preflight
+  name: torch-preflight
   description: Catch PyTorch VRAM leaks, convergence bugs and GPU stalls before commit.
-  entry: torch-guard check
+  entry: torch-preflight check
   language: python
   types_or: [python, pyi]
   require_serial: false
 
-- id: torch-guard-fix
-  name: torch-guard (autofix)
+- id: torch-preflight-fix
+  name: torch-preflight (autofix)
   description: Same checks, applying the safe autofixes in place.
-  entry: torch-guard check --fix
+  entry: torch-preflight check --fix
   language: python
   types_or: [python, pyi]
   require_serial: false

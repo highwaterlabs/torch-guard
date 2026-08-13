@@ -3,9 +3,9 @@ from typing import List, Optional
 
 import pytest
 
-from torch_guard.config import Config
-from torch_guard.diagnostics import Diagnostic
-from torch_guard.engine import check_source
+from torch_preflight.config import Config
+from torch_preflight.diagnostics import Diagnostic
+from torch_preflight.engine import check_source
 
 
 def analyze(source: str, cfg: Optional[Config] = None) -> List[Diagnostic]:

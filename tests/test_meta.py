@@ -12,11 +12,11 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="meta provider needs the [vram] extra")
 
-from torch_guard.analysis.context import build_context  # noqa: E402
-from torch_guard.vram import autodetect as autodetect_mod  # noqa: E402
-from torch_guard.vram.costmodel import params_from_transformer_shape  # noqa: E402
-from torch_guard.vram.providers import meta, resolve_profile  # noqa: E402
-from torch_guard.vram.types import (  # noqa: E402
+from torch_preflight.analysis.context import build_context  # noqa: E402
+from torch_preflight.vram import autodetect as autodetect_mod  # noqa: E402
+from torch_preflight.vram.costmodel import params_from_transformer_shape  # noqa: E402
+from torch_preflight.vram.providers import meta, resolve_profile  # noqa: E402
+from torch_preflight.vram.types import (  # noqa: E402
     Confidence,
     PrecisionMode,
     RiskBand,
@@ -156,7 +156,7 @@ def test_model_args_require_key_value():
 
 def test_meta_profile_feeds_the_cost_model():
     """End to end: an entry point produces a usable estimate."""
-    from torch_guard.vram import estimate_config
+    from torch_preflight.vram import estimate_config
 
     config = RunConfig(batch_size=8, seq_len=128, precision=PrecisionMode.AMP)
     profile = meta.profile(f"{FIXTURE}:Tiny", config)
@@ -335,7 +335,7 @@ def test_literal_folding_refuses_computed_values():
 
 
 def test_estimate_script_autodetects_end_to_end(tmp_path, monkeypatch):
-    from torch_guard.vram import estimate_script
+    from torch_preflight.vram import estimate_script
 
     (tmp_path / "mymodels.py").write_text(
         textwrap.dedent(

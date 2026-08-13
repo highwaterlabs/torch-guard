@@ -3,7 +3,7 @@
 import json
 import textwrap
 
-from torch_guard.cli import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, main
+from torch_preflight.cli import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, main
 
 LEAKY = textwrap.dedent(
     """

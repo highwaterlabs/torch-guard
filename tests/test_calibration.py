@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from torch_guard.vram import archdb, hardware
-from torch_guard.vram.costmodel import estimate, params_from_transformer_shape
-from torch_guard.vram.types import (
+from torch_preflight.vram import archdb, hardware
+from torch_preflight.vram.costmodel import estimate, params_from_transformer_shape
+from torch_preflight.vram.types import (
     OptimizerKind,
     PrecisionMode,
     RunConfig,
@@ -151,7 +151,7 @@ def test_activation_constants_match_the_measurement():
     Changing a constant without re-running the measurement should fail here — that is the
     whole point of the fixture (see calibration/README.md).
     """
-    from torch_guard.vram import costmodel
+    from torch_preflight.vram import costmodel
 
     measured = _load("measured_activations.json")["results"]
 
@@ -252,7 +252,7 @@ def test_cuda_harness_model_trains_on_cpu(dropout, flash):
 
 def test_cuda_harness_model_matches_the_analytic_param_formula():
     """The harness and the cost model must describe the same architecture."""
-    from torch_guard.vram.types import TransformerShape
+    from torch_preflight.vram.types import TransformerShape
 
     module = _load_cuda_harness()
     model = module.Stack(4, 256, 8, 1024, 0.0)
@@ -290,7 +290,7 @@ _CUDA_FILE = FIXTURES / "measured_cuda.json"
 
 @pytest.mark.skipif(not _CUDA_FILE.exists(), reason="no CUDA measurement recorded")
 def test_cuda_constants_match_the_measurement():
-    from torch_guard.vram import costmodel
+    from torch_preflight.vram import costmodel
 
     adopted = _load("measured_cuda.json")["adopted"]
     assert costmodel.CUDA_CONTEXT_BYTES == adopted["cuda_context_mib"] * 1024 ** 2
@@ -302,7 +302,7 @@ def test_cuda_constants_match_the_measurement():
 @pytest.mark.skipif(not _CUDA_FILE.exists(), reason="no CUDA measurement recorded")
 def test_measured_gpu_carries_its_own_context():
     """Where we have a per-card number, that card should use it."""
-    from torch_guard.vram import hardware
+    from torch_preflight.vram import hardware
 
     measurement = _load("measured_cuda.json")["measurements"][0]
     gpu = hardware.GPUS[measurement["gpu_key"]]

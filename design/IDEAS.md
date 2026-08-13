@@ -42,7 +42,7 @@ Each is one file plus a `@register` decorator — the registry was built for thi
 - LSP server for inline editor diagnostics.
 - Flake8/TorchFix plugin shim, per the original doc's compatibility-layer idea — lets teams
   adopt without changing their lint runner.
-- `torch-guard init` to scaffold config + pre-commit + workflow in one command.
+- `torch-preflight init` to scaffold config + pre-commit + workflow in one command.
 
 ## Commercial (post-OSS)
 
@@ -71,10 +71,19 @@ convergence bugs. Worth revisiting that assumption rather than assuming the gap 
 Our public docs do not mention TorchFix, so nothing is stale. If comparison material is
 ever written, note it is archived rather than implying it is a live competitor.
 
-**`torchguard` (no hyphen) is not a real name collision.** 38 downloads last month, and
-every project URL points at `github.com/yourusername/torchguard`, which 404s — the
-packaging template placeholders were never filled in. Different problem too: per-sample
-error tracking for `torch.compile` regions.
+**`torchguard` (no hyphen) blocked the name `torch-guard` on PyPI.** It has 38 downloads
+a month and every project URL points at `github.com/yourusername/torchguard`, which 404s —
+the packaging template placeholders were never filled in. It solves a different problem
+(per-sample error tracking for `torch.compile` regions).
+
+None of which matters, because PyPI rejects a name that is identical after separators are
+stripped: `torch-guard` normalises to `torchguard`. A 404 from `GET /pypi/torch-guard/json`
+means only that no project holds that exact string — it does **not** mean the name can be
+registered. Checking exact availability and calling it free is how we ended up choosing a
+name we could not publish. The project is now `torch-preflight`.
+
+PEP 541 was not an option: `torchguard` shipped a release in January 2026, so it does not
+meet the abandonment bar however dead the repo link is.
 
 ## Open questions worth thinking about
 
