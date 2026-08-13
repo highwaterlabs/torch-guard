@@ -335,3 +335,88 @@ def test_mean_error_against_measured_peaks_stays_small():
 
     mean_error = sum(errors) / len(errors)
     assert mean_error < 0.10, f"mean absolute error {mean_error:.1%} across {len(errors)} runs"
+
+
+# ------------------------------------------------- CNN activations (measured on meta)
+
+_CNN_FILE = FIXTURES / "measured_cnn_activations.json"
+
+
+@pytest.mark.skipif(not _CNN_FILE.exists(), reason="run measure_cnn_activations.py")
+def test_cnn_activations_in_the_snapshot_match_the_measurement():
+    """Vision models used to report activations as unknown. They are now measured."""
+    measured = _load("measured_cnn_activations.json")
+    for name, m in measured["models"].items():
+        profile = archdb.resolve(name)
+        assert profile is not None, f"{name} missing from the snapshot"
+        assert profile.param_count == m["params"], name
+        assert profile.activation_bytes_per_sample == m["activation_bytes_per_sample"], name
+
+
+@pytest.mark.skipif(not _CNN_FILE.exists(), reason="run measure_cnn_activations.py")
+def test_cnn_scaling_assumptions_held_when_measured():
+    """The cost model scales a per-sample figure by batch and by spatial area.
+
+    Both were verified at measurement time rather than assumed; if either stopped holding
+    the stored number would be meaningless.
+    """
+    for name, m in _load("measured_cnn_activations.json")["models"].items():
+        assert m["batch_linear"], f"{name}: activations are not linear in batch size"
+        assert m["area_scaled"], f"{name}: activations do not scale with spatial area"
+
+
+def test_vision_models_now_produce_an_activation_estimate():
+    """The regression this closes: a ResNet used to widen the interval and say nothing."""
+    from torch_preflight.vram.costmodel import estimate
+
+    report = estimate(
+        archdb.resolve("resnet50"),
+        RunConfig(batch_size=64, image_size=224, precision=PrecisionMode.AMP),
+        hardware.GPUS["rtx4090"],
+    )
+    assert report.breakdown.activations > 0
+    assert not any("could not be estimated" in n for n in report.notes)
+
+
+def test_activation_memory_is_not_predictable_from_parameter_count():
+    """Why these had to be measured rather than derived.
+
+    MobileNet-V2 has 3.5M parameters and more activation memory than VGG-16, which has
+    138M. Any formula keyed on parameter count would be badly wrong for both.
+    """
+    mobilenet = archdb.resolve("mobilenet_v2")
+    vgg = archdb.resolve("vgg16")
+    assert mobilenet.param_count < vgg.param_count / 30
+    assert mobilenet.activation_bytes_per_sample > vgg.activation_bytes_per_sample
+
+
+# ------------------------------------------------------ LM head (measured vs fitted)
+
+
+def test_lm_head_retained_bytes_match_the_meta_measurement():
+    """4 bytes per logit element, measured across five shapes and three vocabularies.
+
+    Precision-independent: cross_entropy upcasts to fp32 whatever autocast is doing.
+    """
+    from torch_preflight.vram import costmodel
+
+    assert costmodel.LM_HEAD_RETAINED_BYTES == 4
+
+
+def test_lm_head_cost_does_not_vary_with_precision():
+    """The retained copy is fp32 regardless, so AMP must not shrink this term."""
+    from torch_preflight.vram.costmodel import lm_head_bytes
+    from torch_preflight.vram.types import TransformerShape
+
+    shape = TransformerShape(layers=2, hidden=256, heads=4, vocab=50257, has_lm_head=True)
+    fp32 = lm_head_bytes(shape, RunConfig(batch_size=2, precision=PrecisionMode.FP32), 128)
+    amp = lm_head_bytes(shape, RunConfig(batch_size=2, precision=PrecisionMode.AMP), 128)
+    assert fp32 == amp
+
+
+def test_models_without_an_lm_head_are_not_charged_for_one():
+    from torch_preflight.vram.costmodel import lm_head_bytes
+    from torch_preflight.vram.types import TransformerShape
+
+    encoder = TransformerShape(layers=2, hidden=256, heads=4, vocab=30522)
+    assert lm_head_bytes(encoder, RunConfig(batch_size=2), 128) == 0

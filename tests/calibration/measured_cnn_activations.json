@@ -1,0 +1,95 @@
+{
+  "torch_version": "2.13.0",
+  "method": "saved_tensors_hooks on torch.device('meta'), parameters excluded, deduped by storage._cdata; normalised to a 2-byte activation reference",
+  "reference_image_size": 224,
+  "models": {
+    "resnet18": {
+      "params": 11689512,
+      "activation_bytes_per_sample": 11109120,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 22218240,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "resnet34": {
+      "params": 21797672,
+      "activation_bytes_per_sample": 16141568,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 32283136,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "resnet50": {
+      "params": 25557032,
+      "activation_bytes_per_sample": 43060992,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 86121984,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "resnet101": {
+      "params": 44549160,
+      "activation_bytes_per_sample": 63637248,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 127274496,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "resnet152": {
+      "params": 60192808,
+      "activation_bytes_per_sample": 89018112,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 178036224,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "vgg16": {
+      "params": 138357544,
+      "activation_bytes_per_sample": 36677632,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 73355264,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "vgg19": {
+      "params": 143667240,
+      "activation_bytes_per_sample": 39286784,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 78573568,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "densenet121": {
+      "params": 7978856,
+      "activation_bytes_per_sample": 65347968,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 130695936,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "mobilenet_v2": {
+      "params": 3504872,
+      "activation_bytes_per_sample": 39172992,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 78345984,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "efficientnet_b0": {
+      "params": 5288548,
+      "activation_bytes_per_sample": 44181058,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 88362116,
+      "batch_linear": true,
+      "area_scaled": true
+    },
+    "convnext_tiny": {
+      "params": 28589128,
+      "activation_bytes_per_sample": 54577938,
+      "reference_image_size": 224,
+      "raw_fp32_bytes_batch1": 109155876,
+      "batch_linear": true,
+      "area_scaled": true
+    }
+  }
+}

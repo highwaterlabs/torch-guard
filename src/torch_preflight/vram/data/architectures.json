@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Hand-curated snapshot. 'params' is the published parameter count where known; 'shape' drives the activation formula. CNN entries deliberately carry no activation data - see design/TODO.md, measuring those is a calibration task and guessing them would be worse than reporting 'unknown'. 'uses_dropout' selects the measured activation coefficients: dropout p>0 triples the quadratic attention term (see tests/calibration/measure_activations.py).",
+  "note": "Hand-curated snapshot. 'params' is the published parameter count where known; 'shape' drives the activation formula. CNN 'activation_bytes_per_sample' is measured on the meta device by tests/calibration/measure_cnn_activations.py, normalised to a 2-byte activation reference and scaled by spatial area from 'reference_image_size'. 'uses_dropout' selects the measured activation coefficients: dropout p>0 triples the quadratic attention term (see tests/calibration/measure_activations.py).",
   "models": {
     "gpt2": {
       "aliases": [
@@ -363,57 +363,68 @@
     "resnet18": {
       "kind": "cnn",
       "params": 11689512,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 11109120
     },
     "resnet34": {
       "kind": "cnn",
       "params": 21797672,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 16141568
     },
     "resnet50": {
       "kind": "cnn",
       "params": 25557032,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 43060992
     },
     "resnet101": {
       "kind": "cnn",
       "params": 44549160,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 63637248
     },
     "resnet152": {
       "kind": "cnn",
       "params": 60192808,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 89018112
     },
     "vgg16": {
       "kind": "cnn",
       "params": 138357544,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 36677632
     },
     "vgg19": {
       "kind": "cnn",
       "params": 143667240,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 39286784
     },
     "densenet121": {
       "kind": "cnn",
       "params": 7978856,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 65347968
     },
     "mobilenet_v2": {
       "kind": "cnn",
       "params": 3504872,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 39172992
     },
     "efficientnet_b0": {
       "kind": "cnn",
       "params": 5288548,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 44181058
     },
     "convnext_tiny": {
       "kind": "cnn",
       "params": 28589128,
-      "reference_image_size": 224
+      "reference_image_size": 224,
+      "activation_bytes_per_sample": 54577938
     },
     "whisper-tiny": {
       "kind": "unknown",

@@ -85,17 +85,30 @@ CHECKPOINT_RECOMPUTE_LAYERS = 1
 #: Inference keeps only a couple of layers' activations alive at a time.
 INFERENCE_LIVE_LAYERS = 2
 
-#: An LM head produces [batch, seq, vocab] logits, and the loss keeps more than one copy:
-#: the head's output in the autocast dtype, an fp32 upcast (``cross_entropy`` runs in fp32),
-#: and the ``log_softmax`` output retained for backward. Hence
-#:     bytes = b * s * vocab * (activation_dtype + LM_HEAD_UPCAST + LM_HEAD_LOGSOFTMAX)
+#: An LM head produces [batch, seq, vocab] logits, which at a 128k vocabulary rivals the
+#: entire transformer stack. The cost splits into two parts with very different evidence
+#: behind them, so they are named separately rather than hidden in one constant.
 #:
-#: This is derived from the operations involved, not fitted. Measurement shows it is a
-#: FLOOR: GPT-2 at batch 8 x seq 256 still exceeds the resulting estimate by roughly 20%,
-#: so real loss implementations keep temporaries this does not capture (HF's
-#: ``shift_logits`` contiguous copy is one). Tracked in design/TODO.md.
-LM_HEAD_UPCAST_BYTES = 4
-LM_HEAD_LOGSOFTMAX_BYTES = 4
+#: MEASURED. ``saved_tensors_hooks`` on the meta device, across five (batch, seq, vocab)
+#: combinations spanning three vocabularies, gives exactly 4.00 bytes per logit element
+#: retained for backward — one fp32 copy, the cross-entropy input. The head projection
+#: itself retains ~0.02 bytes per element: its input is the hidden state, already counted
+#: in the transformer term, and its weight is a parameter. Precision-independent, because
+#: ``cross_entropy`` upcasts to fp32 whatever the autocast dtype.
+LM_HEAD_RETAINED_BYTES = 4
+
+#: FITTED, and weakly. Forward-only capture cannot see the backward pass, where the logits
+#: gradient and the softmax-backward workspace are live simultaneously. This is the
+#: difference between what is retained and what the allocator peaks at.
+#:
+#: The value is supported by exactly TWO measured peaks (GPT-2 at two shapes). Sweeping it
+#: against those points lowers mean error monotonically all the way to 18 bytes/element,
+#: which is the signature of absorbing a systematic under-estimate into whichever parameter
+#: scales with b*s*vocab — not of finding a true value. It is therefore left at the
+#: operation-count estimate rather than tuned to flatter the fixtures. GPT-2 at batch 8 x
+#: seq 256 remains ~20% under; closing that honestly needs a vocab/batch sweep against real
+#: peaks. Tracked in design/TODO.md.
+LM_HEAD_BACKWARD_TRANSIENT_BYTES = 6
 
 # ===================================================================================
 
@@ -160,10 +173,10 @@ def lm_head_bytes(shape: TransformerShape, config: RunConfig, seq_len: int) -> i
         return 0
 
     elements = config.batch_size * seq_len * shape.vocab
-    per_element = config.precision.activation_bytes
-    if not config.inference_only:
-        per_element += LM_HEAD_UPCAST_BYTES + LM_HEAD_LOGSOFTMAX_BYTES
-    return elements * per_element
+    if config.inference_only:
+        # No loss, so nothing is retained for backward; only the logits themselves exist.
+        return elements * config.precision.activation_bytes
+    return elements * (LM_HEAD_RETAINED_BYTES + LM_HEAD_BACKWARD_TRANSIENT_BYTES)
 
 
 def _activation_bytes(profile: ModelProfile, config: RunConfig) -> Optional[int]:

@@ -213,10 +213,119 @@ REAL_MODELS = [
     ("gpt2", "gpt2", "causal-lm"),
     ("distilbert-base-uncased", "distilbert-base-uncased", "encoder"),
     ("bert-base-uncased", "bert-base-uncased", "encoder"),
+    # Vision activations were measured on the meta device but have never been checked
+    # against a real peak. This is that check.
+    ("resnet50", "resnet50", "vision"),
 ]
 
 
+def vision_case(name, batch, size, amp_dtype):
+    """Peak for a torchvision classifier, to validate the measured CNN activations."""
+    try:
+        import torchvision.models as tvm
+    except ImportError:
+        return None
+
+    with clean_gpu():
+        model = getattr(tvm, name)().cuda()
+        model.train()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        x = torch.randn(batch, 3, size, size, device="cuda")
+        target = torch.randint(0, 1000, (batch,), device="cuda")
+
+        def step():
+            optimizer.zero_grad(set_to_none=True)
+            with torch.autocast("cuda", dtype=amp_dtype) if amp_dtype else contextlib.nullcontext():
+                loss = torch.nn.functional.cross_entropy(model(x), target)
+            loss.backward()
+            optimizer.step()
+
+        result = training_peak(step)
+        if result is not None:
+            result["params"] = sum(p.numel() for p in model.parameters())
+        del model, optimizer, x, target
+        return result
+
+
+def lm_head_sweep(amp_dtype):
+    """Isolate the per-logit cost by varying vocabulary with everything else fixed.
+
+    The LM-head backward transient is currently fitted on two data points, which is not
+    enough — sweeping it lowers error monotonically, the signature of absorbing a
+    systematic bias rather than converging. Holding the body constant and moving only the
+    vocabulary makes the b*s*vocab coefficient separable.
+    """
+    try:
+        from transformers import GPT2Config, GPT2LMHeadModel
+    except ImportError:
+        return []
+
+    rows = []
+    for vocab in (8000, 32000, 50257, 128256):
+        for batch, seq in ((4, 256), (8, 256)):
+            with clean_gpu():
+                cfg = GPT2Config(n_layer=4, n_embd=256, n_head=4,
+                                 vocab_size=vocab, n_positions=seq)
+                model = GPT2LMHeadModel(cfg).cuda()
+                model.train()
+                optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+                ids = torch.randint(0, vocab - 1, (batch, seq), device="cuda")
+
+                def step():
+                    optimizer.zero_grad(set_to_none=True)
+                    with torch.autocast("cuda", dtype=amp_dtype) if amp_dtype else contextlib.nullcontext():
+                        loss = model(input_ids=ids, labels=ids).loss
+                    loss.backward()
+                    optimizer.step()
+
+                result = training_peak(step)
+                if result is not None:
+                    rows.append({
+                        "vocab": vocab, "batch": batch, "seq": seq,
+                        "logit_elements": batch * seq * vocab,
+                        "params": sum(p.numel() for p in model.parameters()),
+                        **result,
+                    })
+                del model, optimizer, ids
+    return rows
+
+
+def guard_accuracy_case(amp_dtype):
+    """Check VRAMGuard's projection against what the run actually used."""
+    try:
+        from torch_preflight import VRAMGuard
+        import torchvision.models as tvm
+    except ImportError:
+        return None
+
+    with clean_gpu():
+        model = tvm.resnet50().cuda()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        x = torch.randn(32, 3, 224, 224, device="cuda")
+        target = torch.randint(0, 1000, (32,), device="cuda")
+        try:
+            with VRAMGuard(model, optimizer=optimizer, batch_size=32,
+                           image_size=224, precision="amp") as guard:
+                for _ in range(2):
+                    optimizer.zero_grad(set_to_none=True)
+                    with torch.autocast("cuda", dtype=amp_dtype):
+                        loss = torch.nn.functional.cross_entropy(model(x), target)
+                    loss.backward()
+                    optimizer.step()
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        out = {
+            "projected_bytes": guard.report.total if guard.report else None,
+            "measured_peak_bytes": guard.measured_peak,
+            "accuracy": guard.accuracy,
+        }
+        del model, optimizer, x, target
+        return out
+
+
 def real_model_case(hub_id, kind, batch, seq, amp_dtype):
+    if kind == "vision":
+        return vision_case(hub_id, batch, seq, amp_dtype)
     try:
         from transformers import AutoModel, AutoModelForCausalLM
     except ImportError:
@@ -333,7 +442,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("End-to-end peaks for measured_peaks.json")
         print("=" * 74)
         for key, hub_id, kind in REAL_MODELS:
-            for batch, seq in ((4, 128), (8, 256)):
+            shapes = ((16, 224), (32, 224)) if kind == "vision" else ((4, 128), (8, 256))
+            for batch, seq in shapes:
                 result = real_model_case(hub_id, kind, batch, seq, amp_dtype)
                 if result is None:
                     print(f"  {key:<26} b{batch} s{seq}   OOM or transformers missing")
@@ -346,7 +456,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "gpu": _gpu_key(name, total),
                     "config": {
                         "batch_size": batch,
-                        "seq_len": seq,
+                        ("image_size" if kind == "vision" else "seq_len"): seq,
                         "precision": "amp",
                         "optimizer": "adamw",
                         "gradient_checkpointing": False,
@@ -363,6 +473,51 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  {key:<26} b{batch} s{seq}   peak {peak / GIB:6.2f} GiB "
                       f"(allocated {result['max_allocated'] / GIB:.2f})")
 
+    # ------------------------------------------------------------- LM head sweep
+
+    lm_rows = []
+    if args.models:
+        print("\n" + "=" * 74)
+        print("LM-head cost per logit element (vocabulary sweep)")
+        print("=" * 74)
+        lm_rows = lm_head_sweep(amp_dtype)
+        if lm_rows:
+            print(f"  {'vocab':>8}{'batch':>7}{'seq':>6}{'logits':>14}"
+                  f"{'peak GiB':>11}{'d(peak)/d(logit)':>18}")
+            base = None
+            for r in sorted(lm_rows, key=lambda x: (x["batch"], x["vocab"])):
+                peak = r["max_reserved"] + context_bytes
+                slope = ""
+                if base and base["batch"] == r["batch"]:
+                    d_peak = peak - base["peak"]
+                    d_elem = r["logit_elements"] - base["logit_elements"]
+                    if d_elem:
+                        slope = f"{d_peak / d_elem:.2f} B"
+                print(f"  {r['vocab']:>8}{r['batch']:>7}{r['seq']:>6}"
+                      f"{r['logit_elements']:>14,}{peak / GIB:>11.2f}{slope:>18}")
+                base = {**r, "peak": peak}
+            print("\n  The slope is the per-logit cost, transient included. Compare with"
+                  "\n  LM_HEAD_RETAINED_BYTES + LM_HEAD_BACKWARD_TRANSIENT_BYTES.")
+        else:
+            print("  transformers not installed — skipped")
+
+    # ------------------------------------------------------------- VRAMGuard
+
+    guard = None
+    if args.models:
+        print("\n" + "=" * 74)
+        print("VRAMGuard: projection vs what the run actually used")
+        print("=" * 74)
+        guard = guard_accuracy_case(amp_dtype)
+        if not guard:
+            print("  torch-preflight or torchvision not installed — skipped")
+        elif guard.get("error"):
+            print(f"  {guard['error']}")
+        else:
+            print(f"  projected {guard['projected_bytes'] / GIB:.2f} GiB   "
+                  f"measured {guard['measured_peak_bytes'] / GIB:.2f} GiB   "
+                  f"error {guard['accuracy'] * 100:+.1f}%")
+
     # -------------------------------------------------- compare with torch-preflight
 
     try:
@@ -373,9 +528,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("=" * 74)
         print(f"  CUDA_CONTEXT_BYTES      shipped {costmodel.CUDA_CONTEXT_BYTES / MIB:6.0f} MiB"
               f"   measured {context_bytes / MIB:6.0f} MiB")
+
+        # Two fragmentation numbers, and only one of them is the right comparison.
+        # Toy stacks allocate a handful of uniform tensors and under-fragment; real models
+        # churn through embeddings, masks and head projections of many sizes. The shipped
+        # constant is calibrated against the real ones, so show both and say which counts.
+        real = [r["measured_reserved_bytes"] / r["measured_allocated_bytes"] - 1
+                for r in peaks if r.get("measured_allocated_bytes")]
         if mean is not None:
             print(f"  FRAGMENTATION_FRACTION  shipped {costmodel.FRAGMENTATION_FRACTION:6.3f}"
-                  f"       measured {mean:6.3f}")
+                  f"       synthetic {mean:6.3f}  (expected lower — see below)")
+        if real:
+            print(f"  {'':<24}{'':<14} real models {sum(real)/len(real):6.3f}"
+                  f"  <- the one the constant is fitted to")
+        elif args.models:
+            print("  (no real-model runs completed, so no comparison for the constant)")
     except ImportError:
         print("\n(torch-preflight not installed here — skipping the comparison)")
 
@@ -392,6 +559,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "fragmentation_samples": fragmentation,
         "fragmentation_fraction": mean,
         "synthetic_runs": synthetic_rows,
+        "lm_head_sweep": lm_rows,
+        "guard_accuracy": guard,
         "runs": peaks,
     }
     with open(args.out, "w", encoding="utf-8") as handle:
