@@ -111,9 +111,19 @@ Runtime → Change runtime type → **T4 GPU**, then in one cell:
 
 ```python
 !pip install -q torch-preflight transformers
-!wget -q https://raw.githubusercontent.com/<repo>/main/tests/calibration/measure_cuda.py
+!wget -qO measure_cuda.py "https://raw.githubusercontent.com/highwaterlabs/torch-preflight/main/tests/calibration/measure_cuda.py?$(date +%s)"
 !python measure_cuda.py --models
 ```
+
+Two download traps, both of which have already cost a wasted run:
+
+- **`-O` is required.** Plain `wget` refuses to overwrite an existing file; it writes
+  `measure_cuda.py.1` and leaves the old one, so re-running in the same session silently
+  executes the previous version.
+- **The `?$(date +%s)` defeats the CDN.** `raw.githubusercontent.com` caches for a few
+  minutes, so a download immediately after merging can still serve the old file.
+
+If a run produces no `LM-head` or `VRAMGuard` section, it used a stale script.
 
 Pasting the file's contents straight into a cell works too.
 
