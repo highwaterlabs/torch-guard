@@ -210,17 +210,23 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       so `main` — and the tag — still packaged `torch-guard`. The build validated the
       version against the tag but never the name, so it reached the upload step and died
       on an opaque OIDC rejection. A name guard now fails at build time instead.
+- [x] **0.2.0 published**, the VRAMGuard activation fix. Minor rather than patch: the guard
+      now fails and warns on configurations it previously waved through. Every release gate
+      was run locally before tagging, because a PyPI version number can never be reused.
+      Releases exist for both versions; repo description, topics and logo are set.
+- [ ] Bump the GitHub Actions pins. `actions/checkout@v4`, `setup-python@v5` and
+      `upload/download-artifact@v4` all target Node 20, which is deprecated — the runner
+      forces them onto Node 24 and everything passes, so this is not urgent yet.
+- [x] *Declined:* renaming the local working directory from `torch-guard` to
+      `torch-preflight`. Kept as-is deliberately.
 - [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-preflight-cloud/`.
-- [ ] Repo presentation: description, topics (`pytorch`, `linter`, `static-analysis`,
-      `mlops`, `cuda`), and a logo — every comparable project except Pydantic leads with one.
-- [ ] Cut a **GitHub Release** for v0.1.0. The tag exists but there is no release page,
-      so the repo shows no versions and nobody gets a notification. Body can come
-      straight from CHANGELOG.md.
-- [ ] Rename the local working directory from `torch-guard` to `torch-preflight`.
-- [ ] Set `0.1.0` in CHANGELOG.md to a dated release rather than "unreleased".
 - [x] Replaced the hardcoded test-count badge with live PyPI version, Python-version and
       licence badges, which update themselves.
-- [x] Deleted the four merged branches, locally and on the remote.
+- [ ] **Delete the merged branches from the remote.** Five are fully merged into `main`
+      and still there: `calibration/cnn-and-lm-head`, `docs/colab-download-fix`,
+      `fix/guard-activation-measurement`, `feat/tg006-bce-logits` and
+      `chore/zero-stage-and-snapshot`. An earlier entry claimed this was already done
+      "locally and on the remote", which was only ever true locally.
 - [x] **Snapshot refresh process defined**: `tests/calibration/verify_snapshot.py`
       compares the bundled snapshot against the live hub configs. Deliberately a verifier
       rather than a regenerator, so a renamed upstream field cannot silently rewrite the
