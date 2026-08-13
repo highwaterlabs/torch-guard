@@ -1,4 +1,4 @@
-"""torch-guard: a static analyzer for PyTorch training code.
+"""torch-preflight: a static analyzer for PyTorch training code.
 
 Catches VRAM leaks, silent convergence bugs and GPU pipeline stalls before a training
 run is launched, rather than three hours into it.
@@ -10,7 +10,7 @@ from .engine import Result, check_paths, check_source
 
 __version__ = "0.1.0"
 
-#: Exported lazily so that ``import torch_guard`` never pulls in torch. ``VRAMGuard`` is a
+#: Exported lazily so that ``import torch_preflight`` never pulls in torch. ``VRAMGuard`` is a
 #: runtime tool and needs the ``[vram]`` extra; everything else here is dependency-free.
 _LAZY_EXPORTS = {
     "VRAMGuard": ".vram.guard",

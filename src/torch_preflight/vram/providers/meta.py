@@ -26,7 +26,7 @@ Capture is forward-only, so it excludes the transient where a checkpointed layer
 recomputed during backward. The cost model adds that term analytically.
 
 **This provider imports and executes user code.** It is never reached from
-``torch-guard check`` — only from an explicit ``estimate --model module:factory``.
+``torch-preflight check`` — only from an explicit ``estimate --model module:factory``.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def _import_module(module_path: str):
     if module_path.endswith(".py"):
         if not os.path.isfile(module_path):
             raise EntryPointError(f"no such file: {module_path}")
-        name = "_torch_guard_target_" + os.path.basename(module_path)[:-3]
+        name = "_torch_preflight_target_" + os.path.basename(module_path)[:-3]
         spec = importlib.util.spec_from_file_location(name, module_path)
         if spec is None or spec.loader is None:
             raise EntryPointError(f"could not load {module_path}")

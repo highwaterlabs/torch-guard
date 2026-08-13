@@ -16,7 +16,7 @@ Running it on a free Colab / Kaggle T4
 --------------------------------------
 Runtime → Change runtime type → T4 GPU, then in a cell:
 
-    !pip install -q torch-guard transformers
+    !pip install -q torch-preflight transformers
     !wget -q https://raw.githubusercontent.com/<your-repo>/main/tests/calibration/measure_cuda.py
     !python measure_cuda.py
 
@@ -208,7 +208,7 @@ def synthetic_case(layers, h, a, i, batch, seq, dropout, amp_dtype, flash):
 # ------------------------------------------------------------------- real HF models
 
 #: (archdb key, hub id, loader kind). Chosen so the parameter count matches the entry in
-#: torch-guard's bundled snapshot — otherwise the fixture compares different things.
+#: torch-preflight's bundled snapshot — otherwise the fixture compares different things.
 REAL_MODELS = [
     ("gpt2", "gpt2", "causal-lm"),
     ("distilbert-base-uncased", "distilbert-base-uncased", "encoder"),
@@ -363,13 +363,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  {key:<26} b{batch} s{seq}   peak {peak / GIB:6.2f} GiB "
                       f"(allocated {result['max_allocated'] / GIB:.2f})")
 
-    # -------------------------------------------------- compare with torch-guard
+    # -------------------------------------------------- compare with torch-preflight
 
     try:
-        from torch_guard.vram import costmodel
+        from torch_preflight.vram import costmodel
 
         print("\n" + "=" * 74)
-        print("Compared with the constants torch-guard ships")
+        print("Compared with the constants torch-preflight ships")
         print("=" * 74)
         print(f"  CUDA_CONTEXT_BYTES      shipped {costmodel.CUDA_CONTEXT_BYTES / MIB:6.0f} MiB"
               f"   measured {context_bytes / MIB:6.0f} MiB")
@@ -377,7 +377,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  FRAGMENTATION_FRACTION  shipped {costmodel.FRAGMENTATION_FRACTION:6.3f}"
                   f"       measured {mean:6.3f}")
     except ImportError:
-        print("\n(torch-guard not installed here — skipping the comparison)")
+        print("\n(torch-preflight not installed here — skipping the comparison)")
 
     # ------------------------------------------------------------------ output
 
@@ -410,7 +410,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _gpu_key(name: str, total_bytes: Optional[int] = None) -> str:
-    """Best-effort mapping from the device name to a torch-guard hardware key.
+    """Best-effort mapping from the device name to a torch-preflight hardware key.
 
     Board capacity disambiguates the parts that ship in two sizes — the device name alone
     does not distinguish a 40GB A100 from an 80GB one.

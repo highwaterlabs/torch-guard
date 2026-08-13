@@ -1,6 +1,6 @@
 """Scope, loop and autograd-context tracking.
 
-This is the state layer that separates torch-guard from a plain AST linter: rules
+This is the state layer that separates torch-preflight from a plain AST linter: rules
 can ask "am I inside a loop?", "is autograd disabled here?" and "which enclosing
 function am I in?" without re-walking the tree.
 

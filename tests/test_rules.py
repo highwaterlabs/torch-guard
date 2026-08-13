@@ -409,7 +409,7 @@ def test_tg005_flags_softmax_passed_to_nll():
 def test_good_example_is_clean():
     from pathlib import Path
 
-    from torch_guard.engine import check_source
+    from torch_preflight.engine import check_source
 
     path = Path(__file__).parent.parent / "examples" / "good_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
@@ -419,7 +419,7 @@ def test_good_example_is_clean():
 def test_bad_example_triggers_every_rule():
     from pathlib import Path
 
-    from torch_guard.engine import check_source
+    from torch_preflight.engine import check_source
 
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())

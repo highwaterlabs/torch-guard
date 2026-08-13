@@ -1,17 +1,17 @@
 # CLI reference
 
 ```bash
-torch-guard check ./src/              # check a tree
-torch-guard check train.py --fix      # apply autofixes in place
-torch-guard check train.py --diff     # show what --fix would do
-torch-guard check . -f json           # machine-readable
-torch-guard check . -f sarif          # GitHub code scanning
-torch-guard check . -f github         # inline PR annotations
-torch-guard rules                     # list rules
-torch-guard explain TG003             # full write-up for one rule
+torch-preflight check ./src/              # check a tree
+torch-preflight check train.py --fix      # apply autofixes in place
+torch-preflight check train.py --diff     # show what --fix would do
+torch-preflight check . -f json           # machine-readable
+torch-preflight check . -f sarif          # GitHub code scanning
+torch-preflight check . -f github         # inline PR annotations
+torch-preflight rules                     # list rules
+torch-preflight explain TG003             # full write-up for one rule
 ```
 
-`torch-guard ./src` is shorthand for `torch-guard check ./src`.
+`torch-preflight ./src` is shorthand for `torch-preflight check ./src`.
 
 **Speed.** PyTorch's own source — 2285 files — takes about 50 seconds on an 8-core laptop.
 Checking runs across processes by default; `--jobs 1` disables that, and `--fix` always

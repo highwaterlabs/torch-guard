@@ -1,4 +1,4 @@
-"""The same training script written correctly. torch-guard reports nothing here.
+"""The same training script written correctly. torch-preflight reports nothing here.
 
 This file is used as a regression test: any new rule that fires on it is producing a
 false positive on idiomatic PyTorch.

@@ -10,10 +10,10 @@ import pathlib
 
 import pytest
 
-from torch_guard.vram import archdb
-from torch_guard.vram.providers import hub as hub_provider
-from torch_guard.vram.providers import resolve_profile
-from torch_guard.vram.types import Confidence, PrecisionMode, RiskBand, RunConfig
+from torch_preflight.vram import archdb
+from torch_preflight.vram.providers import hub as hub_provider
+from torch_preflight.vram.providers import resolve_profile
+from torch_preflight.vram.types import Confidence, PrecisionMode, RiskBand, RunConfig
 
 
 
@@ -161,7 +161,7 @@ def test_hub_is_never_consulted_without_permission(monkeypatch):
 
 
 def test_hub_estimate_end_to_end(offline_hub):
-    from torch_guard.vram import estimate_config
+    from torch_preflight.vram import estimate_config
 
     profile = resolve_profile("TinyLlama/TinyLlama-1.1B-Chat-v1.0", allow_network=True)
     report = estimate_config(

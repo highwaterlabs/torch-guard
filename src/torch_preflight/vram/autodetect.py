@@ -285,7 +285,7 @@ def explain_failure(construction: Optional[ModelConstruction], path: str) -> str
     """The message shown when autodetection cannot produce an answer."""
     if construction is None:
         return (
-            f"No model construction found in {path}. torch-guard reads architectures from "
+            f"No model construction found in {path}. torch-preflight reads architectures from "
             f'`from_pretrained("...")` literals and from local `nn.Module` subclasses; '
             f"anything else needs --model or --params."
         )

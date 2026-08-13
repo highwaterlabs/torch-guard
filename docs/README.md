@@ -1,4 +1,4 @@
-# torch-guard documentation
+# torch-preflight documentation
 
 Start with the [README](../README.md) if you just want to install it and run it. These
 pages are the detail behind it.

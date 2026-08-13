@@ -3,7 +3,7 @@
 This is the rule that turns pre-flight estimation into a CI gate. It stays completely
 silent unless the project declares a target:
 
-    [tool.torch-guard]
+    [tool.torch-preflight]
     target_gpu = "rtx4090"
 
 and it never fires on a low-confidence estimate — a build failed by a guessed parameter
@@ -32,9 +32,9 @@ class ProjectedOom(Rule):
     severity = Severity.ERROR
     category = Category.CRITICAL_OOM
     explanation = """
-torch-guard reads the training configuration out of the script — model, batch size,
+torch-preflight reads the training configuration out of the script — model, batch size,
 sequence length, precision, optimizer, sharding — and projects peak VRAM against the GPU
-declared in ``[tool.torch-guard] target_gpu``. When the projection exceeds that card, the
+declared in ``[tool.torch-preflight] target_gpu``. When the projection exceeds that card, the
 run is going to fail, and it is far cheaper to learn that in CI than forty minutes into a
 rented A100.
 
@@ -46,7 +46,7 @@ The rule is deliberately conservative:
 * it never fires on a LOW or UNKNOWN confidence estimate;
 * it never reaches the network.
 
-Run ``torch-guard estimate <script> --gpu <target>`` for the full breakdown and the list
+Run ``torch-preflight estimate <script> --gpu <target>`` for the full breakdown and the list
 of changes that would make it fit.
 """.strip()
 
@@ -83,7 +83,7 @@ of changes that would make it fit.
         line = extracted.model_ref_line or 1
         utilization = (report.utilization or 0) * 100
 
-        hint = f"Run `torch-guard estimate {self.ctx.path} --gpu {cfg.target_gpu}` for the "
+        hint = f"Run `torch-preflight estimate {self.ctx.path} --gpu {cfg.target_gpu}` for the "
         fitting = next((r for r in report.remediations if r.fits), None)
         if fitting is not None:
             hint += f"full breakdown. Smallest change that fits: {fitting.label}."

@@ -2,9 +2,9 @@
 
 import textwrap
 
-from torch_guard.config import Config
-from torch_guard.engine import check_file, check_paths, check_source
-from torch_guard.fixer import apply_fixes
+from torch_preflight.config import Config
+from torch_preflight.engine import check_file, check_paths, check_source
+from torch_preflight.fixer import apply_fixes
 
 
 def fixed_source(source: str) -> str:

@@ -2,7 +2,7 @@
 
 Public entry point:
 
-    from torch_guard.vram import estimate_script
+    from torch_preflight.vram import estimate_script
     report = estimate_script("train.py", gpu="a100-80gb")
 
 Nothing in this package imports torch or huggingface_hub at module level.
@@ -65,7 +65,7 @@ def _resolve_target(gpu: Optional[str], gpu_memory: Optional[int]):
         device, count = hardware.resolve(gpu)
         if device is None and gpu_memory is None:
             raise ValueError(
-                f"unknown GPU {gpu!r} — run `torch-guard gpus` for the list, or pass "
+                f"unknown GPU {gpu!r} — run `torch-preflight gpus` for the list, or pass "
                 f"--gpu-memory 48GiB"
             )
     if gpu_memory is not None:

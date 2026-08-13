@@ -1,4 +1,4 @@
-"""Configuration loading from ``pyproject.toml`` / ``.torch-guard.toml``."""
+"""Configuration loading from ``pyproject.toml`` / ``.torch-preflight.toml``."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ DEFAULT_EXCLUDES = [
     ".mypy_cache", ".pytest_cache", ".ruff_cache", ".ipynb_checkpoints",
 ]
 
-CONFIG_FILENAMES = (".torch-guard.toml", "torch-guard.toml", "pyproject.toml")
+CONFIG_FILENAMES = (".torch-preflight.toml", "torch-preflight.toml", "pyproject.toml")
 
 
 @dataclass
@@ -91,7 +91,7 @@ def load_config(start: Path, explicit: Optional[Path] = None) -> Config:
     if explicit is not None:
         data = tomllib.loads(explicit.read_text(encoding="utf-8"))
         if explicit.name == "pyproject.toml":
-            data = data.get("tool", {}).get("torch-guard", {})
+            data = data.get("tool", {}).get("torch-preflight", {})
         return _coerce(data, str(explicit))
 
     start = start if start.is_dir() else start.parent
@@ -102,7 +102,7 @@ def load_config(start: Path, explicit: Optional[Path] = None) -> Config:
                 continue
             data = tomllib.loads(candidate.read_text(encoding="utf-8"))
             if name == "pyproject.toml":
-                data = data.get("tool", {}).get("torch-guard")
+                data = data.get("tool", {}).get("torch-preflight")
                 if data is None:
                     continue
             return _coerce(data, str(candidate))

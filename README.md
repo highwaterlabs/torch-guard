@@ -1,18 +1,18 @@
-# torch-guard
+# torch-preflight
 
-[![CI](https://github.com/highwaterlabs/torch-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/highwaterlabs/torch-guard/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/torch-guard/)
-[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/highwaterlabs/torch-guard/blob/main/LICENSE)
-[![Tests](https://img.shields.io/badge/tests-294%20passing-brightgreen)](https://github.com/highwaterlabs/torch-guard/actions/workflows/ci.yml)
+[![CI](https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml/badge.svg)](https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/torch-preflight/)
+[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/highwaterlabs/torch-preflight/blob/main/LICENSE)
+[![Tests](https://img.shields.io/badge/tests-294%20passing-brightgreen)](https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml)
 
-[**Docs**](https://github.com/highwaterlabs/torch-guard/tree/main/docs/) | [**Rules**](https://github.com/highwaterlabs/torch-guard/blob/main/docs/rules.md) | [**VRAM estimation**](https://github.com/highwaterlabs/torch-guard/blob/main/docs/vram-estimation.md) | [**CLI**](https://github.com/highwaterlabs/torch-guard/blob/main/docs/cli.md)
+[**Docs**](https://github.com/highwaterlabs/torch-preflight/tree/main/docs/) | [**Rules**](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/rules.md) | [**VRAM estimation**](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/vram-estimation.md) | [**CLI**](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/cli.md)
 
 **A static analyzer for PyTorch that understands autograd** — it catches VRAM leaks and
 silent convergence bugs at commit time, and tells you whether your training run will OOM
 before you launch it.
 
 ```console
-$ torch-guard check train.py
+$ torch-preflight check train.py
 
 train.py
   7:19  error   TG001 (CRITICAL_OOM)
@@ -41,7 +41,7 @@ Found 1 error in 1 file(s).
 - 🐍 Python 3.9–3.13, `pyproject.toml` config, pre-commit hook, GitHub Action, SARIF output
 
 `ruff` and `flake8` understand Python. They don't understand autograd graphs, gradient
-accumulation, or what `num_workers=0` does to eight GPUs waiting on one CPU. torch-guard
+accumulation, or what `num_workers=0` does to eight GPUs waiting on one CPU. torch-preflight
 is built for the bugs that only cost money once you're paying for a GPU.
 
 ## Table of contents
@@ -57,18 +57,18 @@ is built for the bugs that only cost money once you're paying for a GPU.
 ## Getting started
 
 ```bash
-pip install torch-guard
+pip install torch-preflight
 ```
 
 ```bash
-torch-guard check ./src/                        # lint a tree
-torch-guard check ./src/ --fix                  # apply the safe fixes
-torch-guard estimate train.py --gpu a100-80gb   # will this run fit?
-torch-guard explain TG003                       # why a rule exists, and what it costs
+torch-preflight check ./src/                        # lint a tree
+torch-preflight check ./src/ --fix                  # apply the safe fixes
+torch-preflight estimate train.py --gpu a100-80gb   # will this run fit?
+torch-preflight explain TG003                       # why a rule exists, and what it costs
 ```
 
-The base install has no heavy dependencies. `torch-guard[hub]` adds Hugging Face
-architecture lookup; `torch-guard[vram]` adds exact meta-device profiling.
+The base install has no heavy dependencies. `torch-preflight[hub]` adds Hugging Face
+architecture lookup; `torch-preflight[vram]` adds exact meta-device profiling.
 
 ## The line that costs you a GPU hour
 
@@ -86,18 +86,18 @@ You have written this. Everyone has. `loss` still carries its computational grap
 appending it retains every intermediate activation from that step — and the next, and the
 next. Memory climbs linearly until CUDA gives up, hours in.
 
-**Why this is hard:** `losses.append(x)` is only a bug when `x` carries a graph. torch-guard
+**Why this is hard:** `losses.append(x)` is only a bug when `x` carries a graph. torch-preflight
 runs a dataflow pass to find out, tracing values across assignments, arithmetic, tensor
 methods and function scopes, and refusing to propagate through `.detach()`, `.item()` or
 `argmax`. So `losses.append(loss.item())` stays silent, and so does anything inside
 `torch.no_grad()`. A linter that pattern-matched on `.append(` would be unusable.
 
-See [all six rules →](https://github.com/highwaterlabs/torch-guard/blob/main/docs/rules.md)
+See [all six rules →](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/rules.md)
 
 ## Will this fit on the GPU I'm about to rent?
 
 ```console
-$ torch-guard estimate finetune.py --gpu a100-80gb
+$ torch-preflight estimate finetune.py --gpu a100-80gb
 
 Model      llama-2-7b  (arch-snapshot)   6.74 B params
 Config     amp · AdamW · batch 4 · seq 2048
@@ -128,7 +128,7 @@ is measured exactly on PyTorch's meta device without allocating a byte.
 Every other estimator stops at the number. The list of what to *change* is the part you
 actually wanted.
 
-See [VRAM estimation →](https://github.com/highwaterlabs/torch-guard/blob/main/docs/vram-estimation.md)
+See [VRAM estimation →](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/vram-estimation.md)
 
 ## Why you can trust the numbers
 
@@ -137,7 +137,7 @@ Memory estimators are easy to write and easy to be quietly wrong about. So:
 |  |  |
 |---|---|
 | **Constants are measured** | Activation coefficients from `saved_tensors_hooks` on the meta device; allocator behaviour and CUDA context from a real GPU. Measurement showed the published Megatron constants are a midpoint of two regimes — models with dropout retain 3× the attention tensors — so Llama-class models are charged the cheaper rate they actually pay. |
-| **Projections are checked** | **5.0% mean absolute error** against measured peaks for GPT-2, BERT and DistilBERT on a T4. Harness and fixtures in [`tests/calibration/`](https://github.com/highwaterlabs/torch-guard/tree/main/tests/calibration/), so you can re-run them. |
+| **Projections are checked** | **5.0% mean absolute error** against measured peaks for GPT-2, BERT and DistilBERT on a T4. Harness and fixtures in [`tests/calibration/`](https://github.com/highwaterlabs/torch-preflight/tree/main/tests/calibration/), so you can re-run them. |
 | **It refuses to guess** | An unrecognised model reports `UNKNOWN` and widens the interval rather than inventing a parameter count. Verdicts are bands with an error range, never a fabricated "95% risk" score. |
 | **It stays quiet** | **5 findings across PyTorch's own 2,239 files**, every one deliberate. That pass found four bugs in the rules, now regression-tested. |
 
@@ -148,15 +148,15 @@ Memory estimators are easy to write and easy to be quietly wrong about. So:
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/highwaterlabs/torch-guard
+  - repo: https://github.com/highwaterlabs/torch-preflight
     rev: v0.1.0
     hooks:
-      - id: torch-guard
+      - id: torch-preflight
 ```
 
 ```yaml
 # .github/workflows/lint.yml
-- uses: highwaterlabs/torch-guard@v0
+- uses: highwaterlabs/torch-preflight@v0
   with:
     paths: src/
     format: github      # inline PR annotations
@@ -165,23 +165,23 @@ repos:
 SARIF output feeds GitHub code scanning; JSON feeds everything else. Set `target_gpu` in
 `pyproject.toml` and CI fails on a projected OOM before the job is ever submitted.
 
-See [CI integration →](https://github.com/highwaterlabs/torch-guard/blob/main/docs/ci.md)
+See [CI integration →](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/ci.md)
 
 ## Documentation
 
 | | |
 |---|---|
-| [Rules](https://github.com/highwaterlabs/torch-guard/blob/main/docs/rules.md) | All six rules, and the false positives deliberately suppressed |
-| [VRAM estimation](https://github.com/highwaterlabs/torch-guard/blob/main/docs/vram-estimation.md) | Custom architectures, CI gating, `VRAMGuard`, accuracy |
-| [CLI reference](https://github.com/highwaterlabs/torch-guard/blob/main/docs/cli.md) | Commands, flags, exit codes, autofixes |
-| [Configuration](https://github.com/highwaterlabs/torch-guard/blob/main/docs/configuration.md) | `pyproject.toml` and inline suppression |
-| [CI integration](https://github.com/highwaterlabs/torch-guard/blob/main/docs/ci.md) | GitHub Action, pre-commit, SARIF |
-| [Architecture](https://github.com/highwaterlabs/torch-guard/blob/main/docs/architecture.md) | How the analysis pipeline works |
-| [Development](https://github.com/highwaterlabs/torch-guard/blob/main/docs/development.md) | Tests, adding a rule, roadmap |
+| [Rules](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/rules.md) | All six rules, and the false positives deliberately suppressed |
+| [VRAM estimation](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/vram-estimation.md) | Custom architectures, CI gating, `VRAMGuard`, accuracy |
+| [CLI reference](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/cli.md) | Commands, flags, exit codes, autofixes |
+| [Configuration](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/configuration.md) | `pyproject.toml` and inline suppression |
+| [CI integration](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/ci.md) | GitHub Action, pre-commit, SARIF |
+| [Architecture](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/architecture.md) | How the analysis pipeline works |
+| [Development](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/development.md) | Tests, adding a rule, roadmap |
 
-Design notes live in [`design/`](https://github.com/highwaterlabs/torch-guard/tree/main/design/), including the
-[RFC](https://github.com/highwaterlabs/torch-guard/blob/main/design/rfcs/0001-vram-estimator.md) behind the estimator and the
-[spike](https://github.com/highwaterlabs/torch-guard/blob/main/design/spikes/0001-meta-device-activation-capture.md) the cost model rests on.
+Design notes live in [`design/`](https://github.com/highwaterlabs/torch-preflight/tree/main/design/), including the
+[RFC](https://github.com/highwaterlabs/torch-preflight/blob/main/design/rfcs/0001-vram-estimator.md) behind the estimator and the
+[spike](https://github.com/highwaterlabs/torch-preflight/blob/main/design/spikes/0001-meta-device-activation-capture.md) the cost model rests on.
 
 ## What stays free
 
@@ -199,9 +199,9 @@ Nothing above is part of that.
 ## Contributing
 
 Issues and pull requests are welcome. Adding a rule is one file plus a `@register`
-decorator — see [development](https://github.com/highwaterlabs/torch-guard/blob/main/docs/development.md) for the walkthrough and the test
+decorator — see [development](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/development.md) for the walkthrough and the test
 conventions.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/highwaterlabs/torch-guard/blob/main/LICENSE).
+MIT — see [LICENSE](https://github.com/highwaterlabs/torch-preflight/blob/main/LICENSE).

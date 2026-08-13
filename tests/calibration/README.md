@@ -69,7 +69,7 @@ needed, and the whole run takes a few minutes.
 Runtime → Change runtime type → **T4 GPU**, then in one cell:
 
 ```python
-!pip install -q torch-guard transformers
+!pip install -q torch-preflight transformers
 !wget -q https://raw.githubusercontent.com/<repo>/main/tests/calibration/measure_cuda.py
 !python measure_cuda.py --models
 ```

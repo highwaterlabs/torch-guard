@@ -33,7 +33,7 @@ class Rule:
     summary: str = ""
     severity: Severity = Severity.WARNING
     category: Category = Category.PERFORMANCE_WARN
-    #: Longer explanation shown by ``torch-guard explain <code>``.
+    #: Longer explanation shown by ``torch-preflight explain <code>``.
     explanation: str = ""
 
     def __init__(self, ctx: FileContext) -> None:

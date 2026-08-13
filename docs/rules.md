@@ -9,12 +9,12 @@
 | **TG005** | error | `CONVERGENCE_BUG` | `softmax` applied before `CrossEntropyLoss` (which applies `log_softmax` itself) |
 | **TG010** | error | `CRITICAL_OOM` | Projected peak VRAM exceeds the configured `target_gpu` — see [VRAM estimation](vram-estimation.md) |
 
-`torch-guard explain TG001` prints the full write-up for any rule, including why it costs
+`torch-preflight explain TG001` prints the full write-up for any rule, including why it costs
 money and how to fix it.
 
 ## The example
 
-`examples/bad_train.py` contains one of each. Running torch-guard on it:
+`examples/bad_train.py` contains one of each. Running torch-preflight on it:
 
 ```
 examples/bad_train.py
@@ -32,7 +32,7 @@ examples/bad_train.py
   fix:  add .detach() (run with --fix)
 ```
 
-`examples/good_train.py` is the same script written correctly; torch-guard reports
+`examples/good_train.py` is the same script written correctly; torch-preflight reports
 nothing on it, and a test asserts that stays true.
 
 # False positives
