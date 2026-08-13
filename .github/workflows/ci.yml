@@ -66,10 +66,42 @@ jobs:
           print("no optional dependency imported")
           PY
 
-      - name: Estimator works without any extras
+      - name: Estimator works, and its exit codes mean what we say they mean
         run: |
-          torch-guard estimate --model llama-2-7b --gpu a100-80gb --batch-size 1 --seq-len 512
-          torch-guard gpus
+          set -e
+          torch-guard gpus > /dev/null
+
+          # A run that fits must exit 0.
+          torch-guard estimate --model gpt2 --gpu a100-80gb \
+            --batch-size 4 --seq-len 512 > /dev/null
+
+          # A run that cannot fit must exit 1, because CI is meant to fail on it. A 7B
+          # full fine-tune in fp32 genuinely does not fit an 80GB A100 — the first
+          # version of this step used exactly that command and was surprised by it.
+          if torch-guard estimate --model llama-2-7b --gpu a100-80gb \
+               --batch-size 1 --seq-len 512 > /dev/null; then
+            echo "expected exit 1 for a projected OOM, got 0"; exit 1
+          fi
+
+  # Nothing in the matrix above installs torch, so the meta provider, autodetection and
+  # VRAMGuard are never exercised there. This job is the only place that code runs.
+  with-extras:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install with every extra
+        run: python -m pip install -e ".[dev,vram,hub]"
+      - name: Test
+        run: python -m pytest -q
+      - name: Confirm the torch-dependent suites actually ran
+        run: |
+          python -m pytest -q tests/test_meta.py tests/test_guard.py \
+            | tee /tmp/out.txt
+          grep -qE "[0-9]+ passed" /tmp/out.txt
+          grep -q "no tests ran" /tmp/out.txt && exit 1 || true
 
   # The hub provider's field mapping only breaks when a real config disagrees with it.
   # Offline tests replay captured configs and run in the matrix above; this job checks the
@@ -85,4 +117,7 @@ jobs:
       - name: Install with the hub extra
         run: python -m pip install -e ".[dev,hub]"
       - name: Run the networked tests
-        run: python -m pytest -q -m network
+        # `-m network` deselects everything else. If the hub tests ever end up in a module
+        # that skips without torch, this collects nothing and pytest exits 5 — which is
+        # how this job failed the first time it ran.
+        run: python -m pytest -q -m network --strict-markers
