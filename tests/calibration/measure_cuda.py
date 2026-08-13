@@ -16,9 +16,14 @@ Running it on a free Colab / Kaggle T4
 --------------------------------------
 Runtime → Change runtime type → T4 GPU, then in a cell:
 
-    !pip install -q torch-preflight transformers
-    !wget -q https://raw.githubusercontent.com/<your-repo>/main/tests/calibration/measure_cuda.py
-    !python measure_cuda.py
+    !pip install -q torch-preflight transformers torchvision
+    !wget -qO measure_cuda.py "https://raw.githubusercontent.com/highwaterlabs/torch-preflight/main/tests/calibration/measure_cuda.py?$(date +%s)"
+    !python measure_cuda.py --models
+
+``-O`` matters. Plain ``wget`` will not overwrite an existing file — it silently writes
+``measure_cuda.py.1`` and leaves the stale copy in place, so a re-run in the same session
+executes the old script. The cache-busting query string defeats raw.githubusercontent's
+CDN, which holds a copy for a few minutes after a push.
 
 Or just paste this file into a cell and run it. It prints a JSON block to copy into
 ``tests/calibration/measured_peaks.json``.
