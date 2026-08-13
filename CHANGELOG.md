@@ -3,7 +3,7 @@
 All notable changes to torch-preflight are recorded here. This project follows
 [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] — 2026-08-13
 
 ### Fixed
 
