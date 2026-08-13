@@ -139,14 +139,23 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [x] `design/` is tracked and public; README links verified.
 - [x] Committed and pushed; README split into `docs/` and rewritten (PRs #1, #2).
 
-- [ ] **Publish 0.1.0 to PyPI.** Workflow and metadata are ready; needs the Trusted
-      Publisher configured on PyPI and a `v0.1.0` tag pushed. Until then the README's
-      `pip install torch-preflight` is a promise the project cannot keep.
+- [x] **0.1.0 published to PyPI**, verified by installing from PyPI into a clean
+      virtualenv: 9 packages, no torch, CLI and estimator both working.
+      The first release attempt failed because the rename lived only on a local branch,
+      so `main` — and the tag — still packaged `torch-guard`. The build validated the
+      version against the tag but never the name, so it reached the upload step and died
+      on an opaque OIDC rejection. A name guard now fails at build time instead.
 - [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-preflight-cloud/`.
 - [ ] Repo presentation: description, topics (`pytorch`, `linter`, `static-analysis`,
       `mlops`, `cuda`), and a logo — every comparable project except Pydantic leads with one.
-- [ ] The **Tests: 294 passing** badge in the README is a hardcoded shields.io label. It
-      will drift the moment a test is added; wire it to something real or drop it.
+- [ ] Cut a **GitHub Release** for v0.1.0. The tag exists but there is no release page,
+      so the repo shows no versions and nobody gets a notification. Body can come
+      straight from CHANGELOG.md.
+- [ ] Rename the local working directory from `torch-guard` to `torch-preflight`.
+- [ ] Set `0.1.0` in CHANGELOG.md to a dated release rather than "unreleased".
+- [x] Replaced the hardcoded test-count badge with live PyPI version, Python-version and
+      licence badges, which update themselves.
+- [x] Deleted the four merged branches, locally and on the remote.
 - [ ] Snapshot refresh process: how is `archdb` regenerated, and on what cadence?
 - [x] **Stress-tested against torch's own source** (2285 files). False-positive rate after
       fixes: **0.0033 findings/file** — 3 findings in 900 files, all "true but intentional"

@@ -3,9 +3,9 @@
 All notable changes to torch-preflight are recorded here. This project follows
 [semantic versioning](https://semver.org/).
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-08-13
 
-First release.
+First release. [On PyPI](https://pypi.org/project/torch-preflight/0.1.0/).
 
 ### Linter
 

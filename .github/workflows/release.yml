@@ -55,6 +55,22 @@ jobs:
       - name: Check metadata renders on PyPI
         run: python -m twine check --strict dist/*
 
+      # The version check above compares the tag to pyproject, but says nothing about
+      # the distribution *name*. v0.1.0 was first tagged on a commit that still packaged
+      # `torch-guard`, and the mismatch only surfaced as an opaque OIDC rejection at the
+      # upload step. Fail here instead, where the message is obvious.
+      - name: Artifacts must be named torch-preflight
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          expected = "torch_preflight"
+          wrong = [p.name for p in pathlib.Path("dist").iterdir()
+                   if not p.name.startswith(expected + "-")]
+          if wrong:
+              sys.exit(f"expected {expected}-* in dist/, found: {wrong}")
+          print("artifact names correct:", [p.name for p in pathlib.Path("dist").iterdir()])
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
