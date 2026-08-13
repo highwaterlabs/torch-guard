@@ -124,7 +124,10 @@ class Provenance:
     #: Scope-qualified, like :attr:`grad`. A flat name set let `prepared = DDP(...)` in
     #: one function make an unrelated `prepared` a thousand lines away look like a model.
     models: Set[Tuple[ScopePath, str]] = field(default_factory=set)
-    criteria: Dict[str, str] = field(default_factory=dict)
+    #: Scope-qualified, like :attr:`grad` and :attr:`models`. A flat name->class map let
+    #: two functions that each bind ``criterion`` collide, so whichever was seen last
+    #: decided the class for both — reporting a ``BCELoss`` call as ``BCEWithLogitsLoss``.
+    criteria: Dict[Tuple[ScopePath, str], str] = field(default_factory=dict)
     module_classes: Set[str] = field(default_factory=set)
     #: Names that were explicitly detached somewhere (used only for hint wording).
     detached: Set[str] = field(default_factory=set)
@@ -168,17 +171,39 @@ class Provenance:
                 return by_convention  # bound here as something else; stop walking out
         return by_convention
 
-    def is_criterion(self, name: Optional[str]) -> bool:
+    def is_criterion(self, name: Optional[str], scope: Optional[ScopePath] = None) -> bool:
         if not name:
             return False
-        if name in self.criteria:
+        if self.criterion_class(name, scope) is not None:
             return True
         return name.rsplit(".", 1)[-1] in CRITERION_NAME_HINTS
 
-    def criterion_class(self, name: Optional[str]) -> Optional[str]:
+    def criterion_class(
+        self, name: Optional[str], scope: Optional[ScopePath] = None
+    ) -> Optional[str]:
+        """Which loss class this name was bound to, scope-aware when a scope is given.
+
+        Walks innermost-outward and stops at the first scope that binds the name, exactly
+        as :meth:`is_grad_name` does. Without the walk, a file with ``crit =
+        nn.BCELoss()`` in one function and ``crit = nn.BCEWithLogitsLoss()`` in another
+        resolved both to whichever was visited last.
+        """
         if not name:
             return None
-        return self.criteria.get(name)
+        if scope is None:
+            for (_, known), cls in self.criteria.items():
+                if known == name:
+                    return cls
+            return None
+
+        for depth in range(len(scope), -1, -1):
+            prefix = scope[:depth]
+            found = self.criteria.get((prefix, name))
+            if found is not None:
+                return found
+            if name in self.bindings.get(prefix, ()):
+                return None  # bound here as something else; stop walking out
+        return None
 
     def is_grad_bearing(self, node: cst.BaseExpression, scope: ScopePath) -> bool:
         """Does evaluating ``node`` here yield a tensor attached to an autograd graph?"""
@@ -403,7 +428,7 @@ class _Collector(ScopeTrackingVisitor):
                 self.prov.models.add((scope, name))
             loss_cls = self._criterion_class(value)
             if loss_cls:
-                self.prov.criteria[name] = loss_cls
+                self.prov.criteria[(scope, name)] = loss_cls
             if isinstance(value, cst.Call) and _has_requires_grad(value):
                 self.seeds.add((scope, name))
             if self.prov.is_explicitly_detached(value):

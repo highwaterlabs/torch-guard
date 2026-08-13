@@ -56,6 +56,20 @@ def train(model, dataset, val_dataset, device):
     return losses, total_loss
 
 
+def train_binary(model, loader, device):
+    """A second head trained with binary cross-entropy."""
+    criterion = nn.BCEWithLogitsLoss()  # applies sigmoid itself
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+
+    for images, targets in loader:
+        logits = model(images.to(device))
+        probs = torch.sigmoid(logits)
+        loss = criterion(probs, targets)  # TG006: sigmoid applied twice
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+
 def evaluate(model, loader, device):
     """TG002: an eval routine with no @torch.no_grad()."""
     correct = 0

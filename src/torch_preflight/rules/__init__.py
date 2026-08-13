@@ -12,6 +12,7 @@ from . import tg002_missing_no_grad  # noqa: F401
 from . import tg003_missing_zero_grad  # noqa: F401
 from . import tg004_dataloader  # noqa: F401
 from . import tg005_softmax_ce  # noqa: F401
+from . import tg006_bce_logits  # noqa: F401
 from . import tg010_projected_oom  # noqa: F401
 
 __all__ = ["RULES", "Rule", "RuleDispatcher", "all_rules", "register"]

@@ -115,7 +115,7 @@ probability reporting only.
             return "nll"
 
         dotted = dotted_name(node.func)
-        cls = self.prov.criterion_class(dotted)
+        cls = self.prov.criterion_class(dotted, self.scope_path)
         if cls == "CrossEntropyLoss":
             return "ce"
         if cls == "NLLLoss":
