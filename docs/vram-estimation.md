@@ -112,6 +112,16 @@ no GPU. That measurement showed the published constants are a midpoint of two re
 models with dropout retain three tensors of `b·a·s²` in the attention path, models without
 retain one — so torch-preflight charges Llama-class models the cheaper rate they actually pay.
 
+**Grouped-query attention does not reduce the activation estimate, and that is deliberate.**
+GQA shrinks the K/V projections, so it looks like it should shrink activations — but
+`transformers.repeat_kv` expands K/V back to the full head count and reshapes, which copies,
+so autograd retains full-size K/V exactly as multi-head attention would. Measured, retained
+bytes are identical across `kv_heads` of 16, 8, 4 and 2. GQA saves parameters (which the
+formula does apply) and KV cache (inference, not modelled) — not training activations.
+`scaled_dot_product_attention(..., enable_gqa=True)` genuinely avoids the copy, but almost
+nothing uses it yet, and modelling the cheap path would under-estimate every mainstream GQA
+model.
+
 The allocator constants are measured on a real GPU, and end-to-end projections are checked
 against measured peaks from actual training steps:
 

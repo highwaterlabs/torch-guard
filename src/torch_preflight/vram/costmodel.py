@@ -152,7 +152,24 @@ ENCODER_DECODER_COEFFS = {
 def transformer_activation_bytes(
     shape: TransformerShape, config: RunConfig, seq_len: int
 ) -> int:
-    """Activation memory for a transformer, in bytes, for one device's micro-batch."""
+    """Activation memory for a transformer, in bytes, for one device's micro-batch.
+
+    ``kv_heads`` is deliberately not used here, though it *is* applied to the parameter
+    count. Grouped-query attention shrinks the K/V projections, so the intuition is that it
+    should shrink activations too — it does not, under the implementation essentially
+    everyone runs. ``transformers.repeat_kv`` expands K/V to the full head count and
+    reshapes, and reshaping a non-contiguous expand copies, so autograd retains full-size
+    K/V exactly as multi-head attention would. MEASURED: retained bytes are bit-identical
+    across kv_heads of 16, 8, 4 and 2 (``tests/test_calibration.py``).
+
+    ``F.scaled_dot_product_attention(..., enable_gqa=True)`` genuinely avoids it, and there
+    the saving is real (0.65x at an 8x group ratio) — but in transformers 5.x that path
+    appears only in the exporters and a single model. Modelling the cheap path would
+    under-estimate every mainstream GQA model, and under-estimating is what lets a run OOM.
+
+    The score matrix is full-head under GQA either way: K/V are broadcast to the query
+    heads, so the O(s^2) term uses ``shape.heads`` and is unaffected.
+    """
     b = config.batch_size
     s = seq_len
     h = shape.hidden
