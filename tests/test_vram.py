@@ -520,3 +520,111 @@ def test_tg010_never_reaches_the_network(monkeypatch):
     monkeypatch.setattr(hub, "fetch_config", explode)
     source = _FINETUNE.replace("meta-llama/Llama-2-7b-hf", "some-org/unknown-model")
     assert _tg010_codes(source, target_gpu="rtx4090") == []
+
+
+# --------------------------------------------------------- DeepSpeed ZeRO stage
+
+
+def _extract_in(tmp_path, source, name="train.py", files=None):
+    for filename, content in (files or {}).items():
+        (tmp_path / filename).write_text(content, encoding="utf-8")
+    path = tmp_path / name
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    return extract_from_source(str(path), path.read_text(encoding="utf-8"))
+
+
+def test_deepspeed_stage_read_from_a_json_config(tmp_path):
+    """Stage 3 shards parameters as well; assuming stage 2 misestimates badly."""
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, opt, _, _ = deepspeed.initialize(model=model, config="ds_config.json")
+        """,
+        files={"ds_config.json": '{"zero_optimization": {"stage": 3}}'},
+    )
+    assert extracted.config.sharding is Sharding.ZERO3
+
+
+def test_deepspeed_stage_read_from_a_dict_literal(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        ds_config = {"zero_optimization": {"stage": 1}, "train_batch_size": 8}
+        engine, _, _, _ = deepspeed.initialize(model=model, config=ds_config)
+        """,
+    )
+    assert extracted.config.sharding is Sharding.ZERO1
+
+
+def test_deepspeed_stage_read_from_an_inline_dict(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, _, _, _ = deepspeed.initialize(
+            model=model, config={"zero_optimization": {"stage": 3}}
+        )
+        """,
+    )
+    assert extracted.config.sharding is Sharding.ZERO3
+
+
+def test_deepspeed_falls_back_to_stage_2_when_the_config_is_unresolvable(tmp_path):
+    """A config built by a function call cannot be read without executing it."""
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, _, _, _ = deepspeed.initialize(model=model, config=build_config())
+        """,
+    )
+    assert extracted.config.sharding is Sharding.ZERO2
+
+
+def test_deepspeed_stage_from_hf_training_arguments(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        from transformers import TrainingArguments
+        args = TrainingArguments(output_dir="out", deepspeed="ds.json")
+        """,
+        files={"ds.json": '{"zero_optimization": {"stage": 3}}'},
+    )
+    assert extracted.config.sharding is Sharding.ZERO3
+
+
+def test_deepspeed_config_outside_the_source_tree_is_not_read(tmp_path):
+    """`check` must not wander up the filesystem following a path from a source file."""
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, _, _, _ = deepspeed.initialize(model=model, config="../../../etc/ds.json")
+        """,
+    )
+    assert extracted.config.sharding is Sharding.ZERO2
+
+
+def test_deepspeed_missing_config_file_degrades_quietly(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, _, _, _ = deepspeed.initialize(model=model, config="absent.json")
+        """,
+    )
+    assert extracted.config.sharding is Sharding.ZERO2
+
+
+def test_deepspeed_malformed_config_degrades_quietly(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, _, _, _ = deepspeed.initialize(model=model, config="bad.json")
+        """,
+        files={"bad.json": "{not valid json"},
+    )
+    assert extracted.config.sharding is Sharding.ZERO2

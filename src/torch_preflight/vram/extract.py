@@ -9,8 +9,10 @@ and the user can see what we assumed and why.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import libcst as cst
 from libcst.metadata import PositionProvider
@@ -71,6 +73,10 @@ class _Extractor(ScopeTrackingVisitor):
         super().__init__()
         self.path = path
         self.constants: Dict[str, int] = {}
+        #: Dict literals by name, so a DeepSpeed config passed by variable can be read.
+        self.dict_literals: Dict[str, cst.Dict] = {}
+        #: True when a DeepSpeed stage had to be assumed rather than read.
+        self.deepspeed_stage_guessed = False
         self.sources: Dict[str, str] = {}
 
         self.batch_candidates: List[Tuple[int, bool, int]] = []  # (value, is_eval, line)
@@ -124,6 +130,13 @@ class _Extractor(ScopeTrackingVisitor):
             for target in node.targets:
                 for name in target_names(target.target):
                     self.constants[name] = value
+
+        # DeepSpeed configs are usually a dict literal assigned to a name and handed to
+        # ``deepspeed.initialize(config=...)``, so keep the node to read the stage from.
+        if isinstance(node.value, cst.Dict):
+            for target in node.targets:
+                for name in target_names(target.target):
+                    self.dict_literals[name] = node.value
 
         # ``model.half()`` / ``model.bfloat16()`` casts the parameters themselves.
         if isinstance(node.value, cst.Call):
@@ -292,10 +305,104 @@ class _Extractor(ScopeTrackingVisitor):
             self.sharding = Sharding.ZERO3
             self._record("sharding", node)
         elif leaf == "initialize" and "deepspeed" in (dotted_name(node.func) or ""):
-            # Stage is in a JSON config we cannot read; ZeRO-2 is the common default.
-            self.sharding = Sharding.ZERO2
             self.saw_fp16_master = True
+            self._read_deepspeed_stage(node)
             self._record("sharding", node)
+        elif leaf == "TrainingArguments" and keyword_arg(node, "deepspeed") is not None:
+            # HF takes the same config, by path or dict, under its own keyword.
+            self.saw_fp16_master = True
+            self._read_deepspeed_stage(node, keyword="deepspeed")
+            self._record("sharding", node)
+
+
+    # ------------------------------------------------------------- DeepSpeed config
+
+    #: DeepSpeed ZeRO stage -> our sharding model. Stage 0 is plain data parallelism.
+    _ZERO_STAGES = {
+        0: Sharding.DDP,
+        1: Sharding.ZERO1,
+        2: Sharding.ZERO2,
+        3: Sharding.ZERO3,
+    }
+
+    def _read_deepspeed_stage(self, node: cst.Call, keyword: str = "") -> None:
+        """Resolve the ZeRO stage instead of assuming it.
+
+        The stage changes the estimate substantially -- stage 3 shards parameters as well
+        as optimizer state, so it is the difference between a 70B model fitting and not.
+        We used to assume stage 2 because "the stage is in a JSON config we cannot read",
+        but in practice it is readable: it is either a dict literal in the same file or a
+        path to a JSON file sitting next to it. Neither requires executing anything.
+
+        Falls back to the old stage-2 assumption when the config cannot be resolved, and
+        records that it was a guess.
+        """
+        config = (
+            keyword_arg(node, keyword) if keyword
+            else keyword_arg(node, "config") or keyword_arg(node, "config_params")
+        )
+        stage = self._zero_stage_from(config.value) if config is not None else None
+
+        if stage is None:
+            self.sharding = Sharding.ZERO2
+            self.deepspeed_stage_guessed = True
+            return
+        self.sharding = self._ZERO_STAGES.get(stage, Sharding.ZERO2)
+        self.deepspeed_stage_guessed = False
+
+    def _zero_stage_from(self, value: cst.BaseExpression) -> Optional[int]:
+        if isinstance(value, cst.Name):
+            literal = self.dict_literals.get(value.value)
+            return self._stage_in_dict(literal) if literal is not None else None
+        if isinstance(value, cst.Dict):
+            return self._stage_in_dict(value)
+        if isinstance(value, cst.SimpleString):
+            return self._stage_in_json(_string_value(value))
+        return None
+
+    def _stage_in_dict(self, node: cst.Dict) -> Optional[int]:
+        for element in node.elements:
+            if not isinstance(element, cst.DictElement):
+                continue
+            key = element.key
+            if not isinstance(key, cst.SimpleString):
+                continue
+            if _string_value(key) != "zero_optimization":
+                continue
+            if not isinstance(element.value, cst.Dict):
+                continue
+            for inner in element.value.elements:
+                if not isinstance(inner, cst.DictElement):
+                    continue
+                if isinstance(inner.key, cst.SimpleString) and _string_value(inner.key) == "stage":
+                    return self._int_of(inner.value)
+        return None
+
+    def _stage_in_json(self, relative: str) -> Optional[int]:
+        """Read ``zero_optimization.stage`` from a JSON config beside the source file.
+
+        Reading a JSON file is not executing code, which is the line that matters for
+        ``check``. Any failure -- missing file, bad JSON, absolute path outside the tree --
+        simply leaves the stage unresolved.
+        """
+        if not relative or os.path.isabs(relative):
+            return None
+        base = os.path.dirname(os.path.abspath(self.path))
+        candidate = os.path.normpath(os.path.join(base, relative))
+        if not candidate.startswith(base) or not os.path.isfile(candidate):
+            return None
+        try:
+            with open(candidate, encoding="utf-8") as handle:
+                data: Any = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        zero = data.get("zero_optimization")
+        if not isinstance(zero, dict):
+            return None
+        stage = zero.get("stage")
+        return stage if isinstance(stage, int) else None
 
     def _check_model_ref(self, node: cst.Call, leaf: str) -> None:
         if leaf != "from_pretrained" or self.model_ref is not None:

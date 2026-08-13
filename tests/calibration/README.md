@@ -1,9 +1,9 @@
 # Calibration fixtures
 
-> **Where things live.** The measurement *scripts* are in `design/experimentations/`, which is
-> gitignored local tooling. The *fixtures* they produce live here and are tracked, because
-> the test suite reads them to pin the constants in `costmodel.py`. Regenerating a fixture
-> means running the script in `design/`; the output lands here.
+> **Where things live.** Scripts and the fixtures they produce are both in this directory
+> and both tracked, so a plain clone can regenerate any constant in `costmodel.py`. The
+> test suite reads the fixtures to pin those constants: changing a number without
+> re-measuring fails the suite.
 
 The cost model is built on empirical constants — fragmentation percentage, CUDA context
 size, the Megatron activation coefficients. They are not derived truths, they are numbers
@@ -21,7 +21,8 @@ that happens to produce confident-looking output.
 | `measured_activations.json` | `saved_tensors_hooks` on the meta device | ±0.5 on each coefficient | ✅ enforced |
 | `measured_cnn_activations.json` | `saved_tensors_hooks` on the meta device | exact | ✅ enforced |
 | LM-head retained bytes | `saved_tensors_hooks`, 5 shapes x 3 vocabularies | exact | ✅ enforced |
-| Peak memory of a real run | `torch.cuda.max_memory_allocated()` | 25% | ✅ 6 runs on a T4 |
+| `measured_encoder_decoder.json` | `saved_tensors_hooks` on the meta device | ±0.5 on each coefficient | ✅ enforced |
+| Peak memory of a real run | `torch.cuda.max_memory_allocated()` | 25% | ✅ 8 runs on a T4 |
 
 ## Activation coefficients — measured
 
@@ -189,3 +190,28 @@ tolerance. If it does not, that is the point: either the fixture is wrong or a c
 Any change to a CALIBRATION constant in `costmodel.py` should move a fixture here. A
 constant tuned until one number looked right, with nothing recording why, is how a cost
 model quietly rots. Loosening a tolerance needs a reason in the commit message.
+
+## Refreshing the architecture snapshot
+
+`verify_snapshot.py` compares `src/torch_preflight/vram/data/architectures.json` against the
+live Hugging Face configs:
+
+```bash
+pip install "torch-preflight[hub]"
+python tests/calibration/verify_snapshot.py
+```
+
+It is a **verifier, not a regenerator**, on purpose. Rewriting the snapshot from whatever
+the hub returns today would let a renamed field silently change numbers the whole cost
+model rests on, in a diff too large to review. It prints what drifted and leaves the edit
+to a human.
+
+**Cadence:** when adding architectures, before a release, and otherwise a few times a year.
+Published models are immutable in practice — `gpt2` will not change shape — so the value is
+catching *our* transcription errors and upstream field renames. Two of those have already
+bitten this project: `tie_word_embeddings` defaulting to True when absent (which put GPT-2
+31% over), and DistilBERT naming its fields `dim` / `hidden_dim` / `n_heads`.
+
+Entries with a published parameter count and no shape are skipped rather than reported:
+that is a legitimate state, and the estimator reports their activations as unknown by
+design.
