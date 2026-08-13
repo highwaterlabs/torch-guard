@@ -1,15 +1,27 @@
-# torch-preflight
+<p align="center">
+  <img src="https://raw.githubusercontent.com/highwaterlabs/torch-preflight/main/assets/logo.svg" width="88" alt="torch-preflight logo"/>
+</p>
 
-[![CI](https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml/badge.svg)](https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/torch-preflight/)
-[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/highwaterlabs/torch-preflight/blob/main/LICENSE)
-[![Tests](https://img.shields.io/badge/tests-294%20passing-brightgreen)](https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml)
+<h1 align="center">torch-preflight</h1>
 
-[**Docs**](https://github.com/highwaterlabs/torch-preflight/tree/main/docs/) | [**Rules**](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/rules.md) | [**VRAM estimation**](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/vram-estimation.md) | [**CLI**](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/cli.md)
+<p align="center"><b>The linter that understands autograd.</b></p>
 
-**A static analyzer for PyTorch that understands autograd** — it catches VRAM leaks and
-silent convergence bugs at commit time, and tells you whether your training run will OOM
-before you launch it.
+<p align="center">
+  <a href="https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml"><img src="https://github.com/highwaterlabs/torch-preflight/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <a href="https://pypi.org/project/torch-preflight/"><img src="https://img.shields.io/pypi/v/torch-preflight" alt="PyPI"/></a>
+  <a href="https://pypi.org/project/torch-preflight/"><img src="https://img.shields.io/pypi/pyversions/torch-preflight" alt="Python versions"/></a>
+  <a href="https://github.com/highwaterlabs/torch-preflight/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/torch-preflight" alt="License"/></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/highwaterlabs/torch-preflight/tree/main/docs"><b>Docs</b></a> &middot;
+  <a href="https://github.com/highwaterlabs/torch-preflight/blob/main/docs/rules.md"><b>Rules</b></a> &middot;
+  <a href="https://github.com/highwaterlabs/torch-preflight/blob/main/docs/vram-estimation.md"><b>VRAM estimation</b></a> &middot;
+  <a href="https://github.com/highwaterlabs/torch-preflight/blob/main/docs/cli.md"><b>CLI</b></a>
+</p>
+
+A static analyzer for PyTorch training code. It catches VRAM leaks and silent convergence
+bugs at commit time, and tells you whether your training run will OOM before you launch it.
 
 ```console
 $ torch-preflight check train.py
