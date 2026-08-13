@@ -97,18 +97,28 @@ INFERENCE_LIVE_LAYERS = 2
 #: ``cross_entropy`` upcasts to fp32 whatever the autocast dtype.
 LM_HEAD_RETAINED_BYTES = 4
 
-#: FITTED, and weakly. Forward-only capture cannot see the backward pass, where the logits
-#: gradient and the softmax-backward workspace are live simultaneously. This is the
-#: difference between what is retained and what the allocator peaks at.
+#: MEASURED, by the vocabulary sweep this constant previously lacked. Forward-only capture
+#: cannot see the backward pass, where the logits gradient and the softmax-backward
+#: workspace are live simultaneously; this is the gap between what is retained and what the
+#: allocator peaks at.
 #:
-#: The value is supported by exactly TWO measured peaks (GPT-2 at two shapes). Sweeping it
-#: against those points lowers mean error monotonically all the way to 18 bytes/element,
-#: which is the signature of absorbing a systematic under-estimate into whichever parameter
-#: scales with b*s*vocab — not of finding a true value. It is therefore left at the
-#: operation-count estimate rather than tuned to flatter the fixtures. GPT-2 at batch 8 x
-#: seq 256 remains ~20% under; closing that honestly needs a vocab/batch sweep against real
-#: peaks. Tracked in design/TODO.md.
-LM_HEAD_BACKWARD_TRANSIENT_BYTES = 6
+#: ``measure_cuda.py --lm-head-sweep`` isolates the term on a deliberately tiny body
+#: (4 layers, n_embd 256) so the vocabulary projection dominates, across four vocabularies
+#: (8k / 32k / 50257 / 128k) at two batch sizes — eight peaks spanning 16x in logit count.
+#: Least squares over all eight gives 15.72 bytes per logit element of *peak*; dividing out
+#: FRAGMENTATION_FRACTION leaves 14.22 bytes allocated, of which LM_HEAD_RETAINED_BYTES is
+#: the measured 4. Hence 10.
+#:
+#: Deliberately NOT the value that minimises error against measured_peaks.json. That
+#: optimum is 14, but GPT-2 is the only fixture there with an LM head, so "the fit" is once
+#: again two points — and they pull in opposite directions (b4 over-estimates, b8 under-),
+#: which no single per-logit constant reconciles. Fitting to them would absorb unrelated
+#: systematic error into whichever parameter scales with b*s*vocab.
+#:
+#: Known limitation: the per-logit cost is not batch-invariant in the measurements —
+#: ~19.7 bytes/logit at batch 4 against ~14.7 at batch 8. A constant cannot express that,
+#: so GPT-2 at batch 8 stays ~12% under. Tracked in design/TODO.md.
+LM_HEAD_BACKWARD_TRANSIENT_BYTES = 10
 
 # ===================================================================================
 

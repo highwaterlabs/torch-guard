@@ -117,15 +117,22 @@ against measured peaks from actual training steps:
 
 | | measured | estimated | error |
 |---|---|---|---|
-| GPT-2, batch 4 × seq 128 | 2.97 GiB | 2.94 GiB | −1.3% |
-| GPT-2, batch 8 × seq 256 | 5.81 GiB | 4.66 GiB | −19.8% |
-| BERT-base, batch 4 × seq 128 | 2.45 GiB | 2.39 GiB | −2.4% |
-| BERT-base, batch 8 × seq 256 | 3.39 GiB | 3.33 GiB | −2.0% |
-| DistilBERT, batch 4 × seq 128 | 1.54 GiB | 1.48 GiB | −3.9% |
-| DistilBERT, batch 8 × seq 256 | 1.96 GiB | 1.94 GiB | −0.8% |
+| GPT-2, batch 4 × seq 128 | 2.97 GiB | 3.04 GiB | +2.5% |
+| GPT-2, batch 8 × seq 256 | 5.81 GiB | 5.09 GiB | −12.4% |
+| BERT-base, batch 4 × seq 128 | 2.44 GiB | 2.39 GiB | −2.1% |
+| BERT-base, batch 8 × seq 256 | 3.38 GiB | 3.33 GiB | −1.7% |
+| DistilBERT, batch 4 × seq 128 | 1.53 GiB | 1.48 GiB | −3.4% |
+| DistilBERT, batch 8 × seq 256 | 1.95 GiB | 1.94 GiB | −0.4% |
+| ResNet-50, batch 16 × 224px | 1.24 GiB | 1.31 GiB | +5.6% |
+| ResNet-50, batch 32 × 224px | 1.99 GiB | 2.02 GiB | +1.4% |
 
-Mean absolute error 5.0%, on a Tesla T4. Regenerate with
+Mean absolute error 3.7%, on a Tesla T4. Regenerate with
 `tests/calibration/measure_cuda.py --models`.
+
+The ResNet-50 rows matter beyond their own accuracy: those activations were measured on the
+meta device, which allocates nothing, and they predict a real allocator to within 6%. That
+is the assumption the whole no-GPU-required approach rests on, now tested rather than
+asserted.
 
 Every estimate carries an interval, and the verdict bands account for it — there is no
 fabricated "95% failure risk" probability, because there is no data to calibrate one
@@ -134,14 +141,13 @@ guessing a parameter count.
 
 **Known gaps**, tracked in [design/TODO.md](../design/TODO.md):
 
-- CNN activation memory is not modelled — vision entries carry parameter counts only, and
-  the report says so and widens the interval instead of inventing a number.
-- Causal-LM loss temporaries are modelled as a **floor**. GPT-2 at batch 8 × seq 256 still
-  exceeds the estimate by ~20%, so real loss implementations keep copies the model does not
-  capture. Encoder models land within 4%.
+- The LM-head cost per logit element is **not batch-invariant** in the measurements —
+  ~19.7 bytes at batch 4 against ~14.7 at batch 8, consistently across four vocabularies. A
+  single constant cannot express that, so GPT-2 at batch 8 × seq 256 remains ~12% under.
+  Encoder models, which have no LM head, land within 4%.
 - Entry-point profiling measures the forward pass only, so the transient where a
   checkpointed layer is recomputed during backward is still modelled analytically.
-- Calibration covers one GPU (T4) and three model families. `CUDA_CONTEXT_BYTES` in
+- Calibration covers one GPU (T4) and four model families. `CUDA_CONTEXT_BYTES` in
   particular is a single data point; larger cards plausibly differ, and
   `hardware.Gpu.context_mib` exists to hold per-card numbers as they arrive.
 - Encoder-decoder models (T5, Whisper) have parameter counts but no activation model.
@@ -166,10 +172,22 @@ VramRiskError: torch-preflight: this configuration is projected to need 701 MiB
 ```
 
 Parameters, gradients, optimizer state and the autocast cache come from the live model and
-are exact; the optimizer kind and precision are read off the objects you pass. It **raises
-only when the run cannot fit even at the optimistic end of the interval** — anything less
-certain is a warning, because aborting a training job on a guess is worse than the OOM it
-was trying to prevent. `strict=True` opts into raising on likely failures too.
+are exact; the optimizer kind and precision are read off the objects you pass.
+
+Activations are **measured from your module**, not guessed. Given a `seq_len`, an
+`image_size` or an explicit `example_input`, the guard runs one forward pass against
+meta-device parameters with `saved_tensors_hooks` attached: that captures exactly what
+autograd would retain while allocating nothing and leaving your model untouched — same
+device, same dtype, same mode, in a few milliseconds. Without a shape, or if the module
+cannot run on meta tensors (a `.item()` in `forward`, a custom autograd function), the term
+is reported unknown and the interval widens. It is never assumed to be zero; for a
+ResNet-50 at batch 32 the activations outweigh everything else combined, and a guard that
+under-counts them stays quiet through exactly the OOM it was installed to catch.
+
+It **raises only when the run cannot fit even at the optimistic end of the interval** —
+anything less certain is a warning, because aborting a training job on a guess is worse
+than the OOM it was trying to prevent. `strict=True` opts into raising on likely failures
+too.
 
 Needs `pip install "torch-preflight[vram]"`. On exit, `guard.measured_peak` and
 `guard.accuracy` compare the projection against what the run actually used.

@@ -3,6 +3,28 @@
 All notable changes to torch-preflight are recorded here. This project follows
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`VRAMGuard` no longer treats activation memory as zero.** It profiled parameters
+  exactly and had no way to see activations, so the term silently read zero — against a
+  real ResNet-50 at batch 32 it projected 0.61 GiB where the card peaked at 1.86 GiB
+  (−67.5%). Under-estimating is the direction that keeps a guard quiet through the OOM it
+  exists to prevent. The guard now measures activations from the live module by running it
+  against meta-device parameters, which allocates nothing and leaves the model untouched;
+  the same case is now +8.8%. Pass `example_input` for models whose input shape cannot be
+  derived from `seq_len` or `image_size`, or `measure_activations=False` to skip it. If the
+  module cannot run on meta tensors the term is reported unknown, never zero.
+
+### Changed
+
+- LM-head backward transient raised from 6 to 10 bytes per logit element, replacing a
+  two-point fit with a measured vocabulary sweep (8k–128k vocabularies at two batch sizes).
+  Mean absolute error against measured peaks improves from 4.4% to 3.7%.
+- Calibration fixtures extended with ResNet-50 peaks, confirming the meta-measured CNN
+  activations against a real allocator (+5.6% and +1.4%).
+
 ## [0.1.0] — 2026-08-13
 
 First release. [On PyPI](https://pypi.org/project/torch-preflight/0.1.0/).
