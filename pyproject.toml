@@ -40,6 +40,9 @@ dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.urls]
 Homepage = "https://github.com/highwaterlabs/torch-guard"
+Documentation = "https://github.com/highwaterlabs/torch-guard/tree/main/docs"
+Source = "https://github.com/highwaterlabs/torch-guard"
+Changelog = "https://github.com/highwaterlabs/torch-guard/blob/main/CHANGELOG.md"
 Issues = "https://github.com/highwaterlabs/torch-guard/issues"
 
 [project.scripts]

@@ -2,10 +2,10 @@
 
 [![CI](https://github.com/highwaterlabs/torch-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/highwaterlabs/torch-guard/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/torch-guard/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/highwaterlabs/torch-guard/blob/main/LICENSE)
 [![Tests](https://img.shields.io/badge/tests-294%20passing-brightgreen)](https://github.com/highwaterlabs/torch-guard/actions/workflows/ci.yml)
 
-[**Docs**](docs/) | [**Rules**](docs/rules.md) | [**VRAM estimation**](docs/vram-estimation.md) | [**CLI**](docs/cli.md)
+[**Docs**](https://github.com/highwaterlabs/torch-guard/tree/main/docs/) | [**Rules**](https://github.com/highwaterlabs/torch-guard/blob/main/docs/rules.md) | [**VRAM estimation**](https://github.com/highwaterlabs/torch-guard/blob/main/docs/vram-estimation.md) | [**CLI**](https://github.com/highwaterlabs/torch-guard/blob/main/docs/cli.md)
 
 **A static analyzer for PyTorch that understands autograd** — it catches VRAM leaks and
 silent convergence bugs at commit time, and tells you whether your training run will OOM
@@ -92,7 +92,7 @@ methods and function scopes, and refusing to propagate through `.detach()`, `.it
 `argmax`. So `losses.append(loss.item())` stays silent, and so does anything inside
 `torch.no_grad()`. A linter that pattern-matched on `.append(` would be unusable.
 
-See [all six rules →](docs/rules.md)
+See [all six rules →](https://github.com/highwaterlabs/torch-guard/blob/main/docs/rules.md)
 
 ## Will this fit on the GPU I'm about to rent?
 
@@ -128,7 +128,7 @@ is measured exactly on PyTorch's meta device without allocating a byte.
 Every other estimator stops at the number. The list of what to *change* is the part you
 actually wanted.
 
-See [VRAM estimation →](docs/vram-estimation.md)
+See [VRAM estimation →](https://github.com/highwaterlabs/torch-guard/blob/main/docs/vram-estimation.md)
 
 ## Why you can trust the numbers
 
@@ -137,7 +137,7 @@ Memory estimators are easy to write and easy to be quietly wrong about. So:
 |  |  |
 |---|---|
 | **Constants are measured** | Activation coefficients from `saved_tensors_hooks` on the meta device; allocator behaviour and CUDA context from a real GPU. Measurement showed the published Megatron constants are a midpoint of two regimes — models with dropout retain 3× the attention tensors — so Llama-class models are charged the cheaper rate they actually pay. |
-| **Projections are checked** | **5.0% mean absolute error** against measured peaks for GPT-2, BERT and DistilBERT on a T4. Harness and fixtures in [`tests/calibration/`](tests/calibration/), so you can re-run them. |
+| **Projections are checked** | **5.0% mean absolute error** against measured peaks for GPT-2, BERT and DistilBERT on a T4. Harness and fixtures in [`tests/calibration/`](https://github.com/highwaterlabs/torch-guard/tree/main/tests/calibration/), so you can re-run them. |
 | **It refuses to guess** | An unrecognised model reports `UNKNOWN` and widens the interval rather than inventing a parameter count. Verdicts are bands with an error range, never a fabricated "95% risk" score. |
 | **It stays quiet** | **5 findings across PyTorch's own 2,239 files**, every one deliberate. That pass found four bugs in the rules, now regression-tested. |
 
@@ -165,23 +165,23 @@ repos:
 SARIF output feeds GitHub code scanning; JSON feeds everything else. Set `target_gpu` in
 `pyproject.toml` and CI fails on a projected OOM before the job is ever submitted.
 
-See [CI integration →](docs/ci.md)
+See [CI integration →](https://github.com/highwaterlabs/torch-guard/blob/main/docs/ci.md)
 
 ## Documentation
 
 | | |
 |---|---|
-| [Rules](docs/rules.md) | All six rules, and the false positives deliberately suppressed |
-| [VRAM estimation](docs/vram-estimation.md) | Custom architectures, CI gating, `VRAMGuard`, accuracy |
-| [CLI reference](docs/cli.md) | Commands, flags, exit codes, autofixes |
-| [Configuration](docs/configuration.md) | `pyproject.toml` and inline suppression |
-| [CI integration](docs/ci.md) | GitHub Action, pre-commit, SARIF |
-| [Architecture](docs/architecture.md) | How the analysis pipeline works |
-| [Development](docs/development.md) | Tests, adding a rule, roadmap |
+| [Rules](https://github.com/highwaterlabs/torch-guard/blob/main/docs/rules.md) | All six rules, and the false positives deliberately suppressed |
+| [VRAM estimation](https://github.com/highwaterlabs/torch-guard/blob/main/docs/vram-estimation.md) | Custom architectures, CI gating, `VRAMGuard`, accuracy |
+| [CLI reference](https://github.com/highwaterlabs/torch-guard/blob/main/docs/cli.md) | Commands, flags, exit codes, autofixes |
+| [Configuration](https://github.com/highwaterlabs/torch-guard/blob/main/docs/configuration.md) | `pyproject.toml` and inline suppression |
+| [CI integration](https://github.com/highwaterlabs/torch-guard/blob/main/docs/ci.md) | GitHub Action, pre-commit, SARIF |
+| [Architecture](https://github.com/highwaterlabs/torch-guard/blob/main/docs/architecture.md) | How the analysis pipeline works |
+| [Development](https://github.com/highwaterlabs/torch-guard/blob/main/docs/development.md) | Tests, adding a rule, roadmap |
 
-Design notes live in [`design/`](design/), including the
-[RFC](design/rfcs/0001-vram-estimator.md) behind the estimator and the
-[spike](design/spikes/0001-meta-device-activation-capture.md) the cost model rests on.
+Design notes live in [`design/`](https://github.com/highwaterlabs/torch-guard/tree/main/design/), including the
+[RFC](https://github.com/highwaterlabs/torch-guard/blob/main/design/rfcs/0001-vram-estimator.md) behind the estimator and the
+[spike](https://github.com/highwaterlabs/torch-guard/blob/main/design/spikes/0001-meta-device-activation-capture.md) the cost model rests on.
 
 ## What stays free
 
@@ -199,9 +199,9 @@ Nothing above is part of that.
 ## Contributing
 
 Issues and pull requests are welcome. Adding a rule is one file plus a `@register`
-decorator — see [development](docs/development.md) for the walkthrough and the test
+decorator — see [development](https://github.com/highwaterlabs/torch-guard/blob/main/docs/development.md) for the walkthrough and the test
 conventions.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/highwaterlabs/torch-guard/blob/main/LICENSE).
