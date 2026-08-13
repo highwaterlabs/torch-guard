@@ -112,7 +112,23 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       activation estimate.
 - [ ] Grouped-query attention shrinks the KV projections; the activation formula ignores
       that and will slightly over-estimate GQA models.
-- [ ] DeepSpeed ZeRO stage is read from a JSON config we do not parse — we assume stage 2.
+- [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
+      a JSON config we cannot read", which was untrue: it is either a dict literal in the
+      same file or a path to a JSON file beside it, and reading JSON is not executing code.
+      Handles `deepspeed.initialize(config=...)` by path, by variable and inline, plus
+      `TrainingArguments(deepspeed=...)`. Falls back to the old stage-2 assumption when the
+      config is genuinely unresolvable (built by a function call). Path traversal outside
+      the source tree is refused, and missing or malformed JSON degrades quietly.
+      This matters: stage 3 shards parameters too, so it is the difference between a 70B
+      model fitting and not.
+- [ ] DeepSpeed **offload** (`offload_optimizer` / `offload_param`) moves state to CPU and
+      is now visible in the configs we parse, but is not modelled — we still charge it to
+      the GPU, which over-estimates offloaded runs.
+- [x] **GitHub Actions pins bumped off Node 20**: checkout v4->v7, setup-python v5->v7,
+      upload-artifact v4->v7, download-artifact v4->v8. PR CI exercises `ci.yml`, but
+      `release.yml` only runs on a tag — rehearse it via `workflow_dispatch` (which builds
+      and checks without publishing) before the next release, since the artifact
+      upload/download pair is the part CI does not cover.
 
 ## Phase 2 — exact tier
 
@@ -182,7 +198,11 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [x] Replaced the hardcoded test-count badge with live PyPI version, Python-version and
       licence badges, which update themselves.
 - [x] Deleted the four merged branches, locally and on the remote.
-- [ ] Snapshot refresh process: how is `archdb` regenerated, and on what cadence?
+- [x] **Snapshot refresh process defined**: `tests/calibration/verify_snapshot.py`
+      compares the bundled snapshot against the live hub configs. Deliberately a verifier
+      rather than a regenerator, so a renamed upstream field cannot silently rewrite the
+      numbers in a diff too large to review. Cadence and rationale in
+      `tests/calibration/README.md`. Currently 6 entries verified clean.
 - [x] **Stress-tested against torch's own source** (2285 files). False-positive rate after
       fixes: **0.0033 findings/file** — 3 findings in 900 files, all "true but intentional"
       deliberate graph retention (pipeline parallelism, distributed autograd tests). Three
