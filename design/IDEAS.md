@@ -9,8 +9,12 @@ do it, or to an [RFC](rfcs/) when it needs a design first.
 
 Each is one file plus a `@register` decorator — the registry was built for this.
 
-- **TG009** in-place ops on tensors needed for backward (`x += 1` vs `x = x + 1`). The one
-  rule here that genuinely needs alias analysis — probably its own RFC.
+- **TG009** in-place ops on tensors needed for backward (`x += 1` vs `x = x + 1`).
+  **Decided against.** PyTorch already raises a precise error naming the offending tensor
+  and version counter, so a pre-flight check adds nothing the interpreter will not tell you
+  a second later — and unlike TG001 or TG011, the failure is loud rather than silent.
+  Detecting it properly also needs real alias analysis, which nothing else in the engine
+  requires. If it is ever wanted, it deserves its own RFC rather than a rule file.
 
 ## Analysis engine
 

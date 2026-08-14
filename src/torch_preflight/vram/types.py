@@ -253,6 +253,12 @@ class RunConfig:
     accumulation_steps: int = 1
     world_size: int = 1
     sharding: Sharding = Sharding.NONE
+    #: Autoregressive decoding, which caches K and V for every token generated so far.
+    #: Distinct from ``inference_only``: a forward pass over a batch builds no cache.
+    generation: bool = False
+    #: Total context the cache has to hold — prompt plus everything generated. Defaults to
+    #: ``seq_len`` when not given.
+    max_context: Optional[int] = None
     #: DeepSpeed ZeRO-Offload: optimizer state and the fp32 master copy live in CPU memory
     #: rather than on the device. Read from ``zero_optimization.offload_optimizer``.
     offload_optimizer: bool = False
@@ -300,6 +306,9 @@ class MemoryBreakdown:
     master_weights: int = 0
     autocast_cache: int = 0
     activations: int = 0
+    #: Keys and values cached across decoding steps. Generation only — a training step or a
+    #: plain forward pass builds no cache.
+    kv_cache: int = 0
     cuda_context: int = 0
     fragmentation: int = 0
 
@@ -312,6 +321,7 @@ class MemoryBreakdown:
             + self.master_weights
             + self.autocast_cache
             + self.activations
+            + self.kv_cache
             + self.cuda_context
             + self.fragmentation
         )
@@ -324,6 +334,7 @@ class MemoryBreakdown:
             ("master weights", self.master_weights),
             ("autocast cache", self.autocast_cache),
             ("activations", self.activations),
+            ("KV cache", self.kv_cache),
             ("CUDA context", self.cuda_context),
             ("fragmentation", self.fragmentation),
         ]

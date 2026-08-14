@@ -124,11 +124,12 @@ def render_terminal(report: VramReport, console: Optional[Console] = None) -> No
 
 
 def _config_line(config) -> str:
-    parts = [
-        config.precision.value,
-        config.optimizer.label,
-        f"batch {config.batch_size}",
-    ]
+    parts = [config.precision.value]
+    # An optimizer is meaningless without a backward pass; naming one on an inference
+    # estimate reads like the tool misunderstood the script.
+    if not config.inference_only:
+        parts.append(config.optimizer.label)
+    parts.append(f"batch {config.batch_size}")
     if config.seq_len:
         parts.append(f"seq {config.seq_len}")
     if config.image_size:
@@ -141,7 +142,11 @@ def _config_line(config) -> str:
         parts.append("flash attention")
     if config.sharding.value != "none":
         parts.append(f"{config.sharding.label} x{config.world_size}")
-    if config.inference_only:
+    if config.max_context and config.generation:
+        parts.append(f"context {config.max_context}")
+    if config.generation:
+        parts.append("generation (KV cache)")
+    elif config.inference_only:
         parts.append("inference only (no backward found)")
     return " · ".join(parts)
 
