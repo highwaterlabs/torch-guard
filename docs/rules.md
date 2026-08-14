@@ -8,6 +8,7 @@
 | **TG004** | warning | `PERFORMANCE_WARN` | `DataLoader` with `num_workers=0` or no `pin_memory` while the file targets CUDA |
 | **TG005** | error | `CONVERGENCE_BUG` | `softmax` applied before `CrossEntropyLoss` (which applies `log_softmax` itself) |
 | **TG006** | error | `CONVERGENCE_BUG` | Binary cross-entropy paired with the wrong activation — `sigmoid` before `BCEWithLogitsLoss`, or raw logits into `BCELoss` |
+| **TG012** | error | `CONVERGENCE_BUG` | `DataLoader` under DDP with no `DistributedSampler` — every rank trains on identical batches |
 | **TG014** | error | `CONVERGENCE_BUG` | Gradient accumulation without dividing the loss — summed gradients scaled as if averaged, equivalent to an N× learning rate |
 | **TG010** | error | `CRITICAL_OOM` | Projected peak VRAM exceeds the configured `target_gpu` — see [VRAM estimation](vram-estimation.md) |
 

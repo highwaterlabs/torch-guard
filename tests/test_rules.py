@@ -430,7 +430,7 @@ def test_bad_example_triggers_every_rule():
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
     assert {d.code for d in diagnostics} == {
-        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG014",
+        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG012", "TG014",
     }
 
 
@@ -916,6 +916,93 @@ def test_tg014_silent_when_a_framework_owns_the_scaling():
     )
 
 
+# --------------------------------------------------------------------- TG012
+
+
+def ddp_source(*body: str) -> str:
+    """A DDP training function whose body is the given lines, indented consistently."""
+    lines = "\n".join(f"        {line}" for line in body)
+    return (
+        "import torch.distributed as dist\n"
+        "from torch.nn.parallel import DistributedDataParallel\n"
+        "from torch.utils.data import DataLoader, DistributedSampler\n"
+        "\n"
+        "def train(dataset, model):\n"
+        '    dist.init_process_group("nccl")\n'
+        "    model = DistributedDataParallel(model)\n"
+    ).replace("        ", "    ") + lines.replace("        ", "    ")
+
+
+def test_tg012_flags_a_training_loader_without_a_sampler():
+    assert "TG012" in codes(ddp_source("loader = DataLoader(dataset, batch_size=32, shuffle=True)"))
+
+
+def test_tg012_silent_with_a_sampler_by_variable():
+    assert "TG012" not in codes(ddp_source(
+        "sampler = DistributedSampler(dataset)",
+        "loader = DataLoader(dataset, sampler=sampler)",
+    ))
+
+
+def test_tg012_silent_with_an_inline_sampler():
+    assert "TG012" not in codes(ddp_source(
+        "loader = DataLoader(dataset, sampler=DistributedSampler(dataset))"
+    ))
+
+
+def test_tg012_silent_with_a_batch_sampler():
+    """A custom batch sampler is presumed to handle sharding; second-guessing it is noise."""
+    assert "TG012" not in codes(ddp_source(
+        "loader = DataLoader(dataset, batch_sampler=batches)"
+    ))
+
+
+def test_tg012_silent_without_distributed_training():
+    """Single-process training needs no sampler at all."""
+    assert "TG012" not in codes(
+        """
+        from torch.utils.data import DataLoader
+        def train(dataset):
+            return DataLoader(dataset, batch_size=32, shuffle=True)
+        """
+    )
+
+
+def test_tg012_warns_rather_than_errors_for_an_eval_loader():
+    """Duplicated validation wastes work but computes the right number."""
+    diagnostics = analyze(ddp_source("val_loader = DataLoader(dataset, batch_size=32)"))
+    found = [d for d in diagnostics if d.code == "TG012"]
+    assert found and all(d.severity.name == "WARNING" for d in found)
+
+
+def test_tg012_separates_training_from_eval_loaders_in_one_file():
+    diagnostics = analyze(ddp_source(
+        "loader = DataLoader(dataset, shuffle=True)",
+        "val_loader = DataLoader(dataset)",
+    ))
+    found = {d.severity.name for d in diagnostics if d.code == "TG012"}
+    assert found == {"ERROR", "WARNING"}, found
+
+
+def test_tg012_silent_when_accelerate_injects_the_sampler():
+    """Accelerate re-creates loaders with a shard-aware sampler in `prepare`.
+
+    Flagging this would be wrong twice: the code is already correct, and adding a sampler
+    on top would shard data that is already sharded.
+    """
+    assert "TG012" not in codes(
+        """
+        from accelerate import Accelerator
+        from torch.nn.parallel import DistributedDataParallel
+        from torch.utils.data import DataLoader
+        def train(dataset, model):
+            accelerator = Accelerator()
+            loader = DataLoader(dataset, batch_size=32, shuffle=True)
+            model, loader = accelerator.prepare(model, loader)
+        """
+    )
+
+
 def test_tg014_silent_for_a_scheduler_step():
     """`scheduler.step()` applies no gradients, so a modulo around it is not accumulation."""
     assert "TG014" not in codes(
@@ -945,3 +1032,45 @@ def test_tg014_autofix_divides_only_what_autograd_sees():
     assert applied, "the TG014 fix should have applied"
     assert "(loss / accumulation_steps).backward()" in fixed
     assert "loss = torch.nn.functional.cross_entropy" in fixed, "must not touch the loss line"
+def test_tg012_does_not_leak_across_functions():
+    """A DDP setup in one function must not flag loaders in another.
+
+    Regression: `uses_distributed` is a file-level fact, and firing on it alone flagged
+    every DataLoader in the file — including single-process helpers that never touch DDP.
+    Same file-wide leakage that once made `prov.models` and `criteria` report against
+    unrelated names. The marker must be in the loader's own function or at module level.
+    """
+    diagnostics = analyze(
+        """
+        import torch.distributed as dist
+        from torch.nn.parallel import DistributedDataParallel
+        from torch.utils.data import DataLoader, DistributedSampler
+
+        def single_process(dataset):
+            return DataLoader(dataset, batch_size=32, shuffle=True)
+
+        def distributed(dataset, model):
+            dist.init_process_group("nccl")
+            model = DistributedDataParallel(model)
+            return DataLoader(dataset, batch_size=32, shuffle=True)
+        """
+    )
+    found = [d for d in diagnostics if d.code == "TG012"]
+    assert len(found) == 1, [(d.line, d.message) for d in found]
+    # The DDP function's loader is the *second* DataLoader in the snippet.
+    assert found[0].line > 8, f"flagged the single-process loader, at line {found[0].line}"
+
+
+def test_tg012_fires_when_the_process_group_is_at_module_level():
+    """Module-level setup governs every loader in the file."""
+    assert "TG012" in codes(
+        """
+        import torch.distributed as dist
+        from torch.utils.data import DataLoader
+
+        dist.init_process_group("nccl")
+
+        def train(dataset):
+            return DataLoader(dataset, batch_size=32, shuffle=True)
+        """
+    )

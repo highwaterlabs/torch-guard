@@ -82,6 +82,17 @@ def train_with_accumulation(model, loader, device):
         if (step + 1) % accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
+def train_distributed(model, dataset, device):
+    """Multi-GPU training where every rank sees the same data."""
+    import torch.distributed as dist
+    from torch.nn.parallel import DistributedDataParallel
+
+    dist.init_process_group("nccl")
+    model = DistributedDataParallel(model)
+    # TG012: no DistributedSampler, so all ranks iterate the whole dataset
+    loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4,
+                        pin_memory=True)
+    return loader
 
 
 def evaluate(model, loader, device):

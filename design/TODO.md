@@ -245,6 +245,24 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       TG007 (CPU-GPU thrashing) last and with care: `.item()` is the *fix* for TG001 but a
       sync point in a hot loop, so the rule has to tell "once per step" from "once per
       element" or it will contradict a rule we already ship.
+- [x] **TG012 — DataLoader under DDP with no DistributedSampler.** Every rank iterates the
+      whole dataset in the same order, so N ranks compute gradients on identical batches and
+      DDP averages them to no effect: N GPUs training as one, on 1/N of the data per epoch.
+      Errors on training loaders, warns on evaluation ones (duplicated validation wastes
+      work but computes the right number). Silent when a sampler or `batch_sampler` is
+      passed, and when Lightning, Accelerate or the HF Trainer is present — they inject a
+      sampler, so flagging them would tell someone to shard already-sharded data.
+      Clean on torch's 2,285 files.
+
+      Caught the file-wide-leakage pattern a third time before shipping: `uses_distributed`
+      is a per-file fact, so firing on it alone flagged every DataLoader in a file where any
+      *one* function set up DDP — including single-process helpers. The marker must now be
+      in the loader's own function, or at module level where it governs everything.
+      Regression-tested both ways.
+- [ ] TG007-TG009, TG011 and TG013, listed in [IDEAS.md](IDEAS.md). Next: TG011
+      (`model.eval()` with no matching `train()`). TG007 (CPU-GPU thrashing) last and with
+      care: `.item()` is the *fix* for TG001 but a sync point in a hot loop, so the rule has
+      to tell "once per step" from "once per element" or it will contradict a rule we ship.
 
 ## Cross-cutting
 

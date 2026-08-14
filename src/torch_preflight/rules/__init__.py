@@ -14,6 +14,7 @@ from . import tg004_dataloader  # noqa: F401
 from . import tg005_softmax_ce  # noqa: F401
 from . import tg006_bce_logits  # noqa: F401
 from . import tg010_projected_oom  # noqa: F401
+from . import tg012_distributed_sampler  # noqa: F401
 from . import tg014_accumulation_scaling  # noqa: F401
 
 __all__ = ["RULES", "Rule", "RuleDispatcher", "all_rules", "register"]

@@ -48,6 +48,10 @@ class FileContext:
     #: a value reaching ``BCELoss`` is raw logits rather than probabilities.
     has_sigmoid: bool = False
     uses_bce_with_logits: bool = False
+    #: DDP or an explicit process group: the run has more than one rank.
+    uses_distributed: bool = False
+    #: Names bound to a ``DistributedSampler(...)``, so a sampler passed by variable counts.
+    distributed_sampler_vars: Set[str] = field(default_factory=set)
     is_lightning: bool = False
     uses_cuda: bool = False
 
@@ -66,6 +70,8 @@ class _FactCollector(cst.CSTVisitor):
         self.sigmoid_vars: Dict[str, str] = {}
         self.has_sigmoid = False
         self.uses_bce_with_logits = False
+        self.uses_distributed = False
+        self.distributed_sampler_vars: Set[str] = set()
         self.is_lightning = False
 
     def visit_Import(self, node: cst.Import) -> bool:
@@ -103,6 +109,11 @@ class _FactCollector(cst.CSTVisitor):
                     name = dotted_name(target.target)
                     if name:
                         self.sigmoid_vars[name] = "sigmoid"
+            elif leaf == "DistributedSampler":
+                for target in node.targets:
+                    name = dotted_name(target.target)
+                    if name:
+                        self.distributed_sampler_vars.add(name)
         return True
 
     def visit_Call(self, node: cst.Call) -> bool:
@@ -115,6 +126,8 @@ class _FactCollector(cst.CSTVisitor):
             self.uses_bce_with_logits = True
         if leaf in ("sigmoid", "Sigmoid"):
             self.has_sigmoid = True
+        if leaf in ("DistributedDataParallel", "DDP", "init_process_group"):
+            self.uses_distributed = True
         return True
 
 
@@ -143,6 +156,8 @@ def build_context(path: str, source: str, module: Optional[cst.Module] = None) -
         sigmoid_vars=facts.sigmoid_vars,
         has_sigmoid=facts.has_sigmoid or ".sigmoid()" in source,
         uses_bce_with_logits=facts.uses_bce_with_logits,
+        uses_distributed=facts.uses_distributed,
+        distributed_sampler_vars=facts.distributed_sampler_vars,
         is_lightning=facts.is_lightning,
         uses_cuda=any(marker in source for marker in _CUDA_MARKERS),
     )
