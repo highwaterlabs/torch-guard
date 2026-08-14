@@ -120,6 +120,32 @@ LM_HEAD_RETAINED_BYTES = 4
 #: so GPT-2 at batch 8 stays ~12% under. Tracked in design/TODO.md.
 LM_HEAD_BACKWARD_TRANSIENT_BYTES = 10
 
+#: Encoder-decoder activation coefficients, per architecture family.
+#:
+#: MEASURED by tests/calibration/measure_encoder_decoder.py across three sizes of each
+#: family on the meta device. A decoder-only stack has one sequence length; these have two,
+#: and a decoder layer carries a third attention block whose K/V projections run at the
+#: *encoder* length. Neither is expressible in the decoder-only formula, which is why these
+#: models used to report activations as unknown rather than guess.
+#:
+#: ``attn`` is not fitted. It is pinned to the separately measured self-attention
+#: coefficient (6.0 with dropout, 2.0 without) and reused for cross-attention, because
+#: otherwise the fit is degenerate: Whisper's encoder length is fixed at 1500 and every
+#: Whisper size uses head_dim 64, which makes the linear and quadratic columns exactly
+#: proportional. Unconstrained it returned a decoder linear coefficient of 0.16. T5, where
+#: the split *is* identifiable, fits cross-attention free at 6.03 against the pinned 6.0.
+#:
+#: Families are separate because the architectures differ in what they retain: T5 carries
+#: relative position bias and dropout, Whisper has a conv frontend and p=0.0.
+ENCODER_DECODER_COEFFS = {
+    "t5": {
+        "enc_linear": 48.44, "dec_linear": 60.58, "cross_kv": 4.05, "attn": 6.0,
+    },
+    "whisper": {
+        "enc_linear": 33.20, "dec_linear": 40.21, "cross_kv": 4.19, "attn": 2.0,
+    },
+}
+
 # ===================================================================================
 
 
@@ -154,6 +180,59 @@ def transformer_activation_bytes(
         return int((linear + attention) * INFERENCE_LIVE_LAYERS * dtype_scale)
 
     return int((linear + attention) * shape.layers * dtype_scale)
+
+
+def encoder_decoder_activation_bytes(
+    shape: TransformerShape, config: RunConfig, seq_len: int
+) -> Optional[int]:
+    """Activation memory for an encoder-decoder model (T5, Whisper).
+
+    Two sequence lengths are in play. The encoder runs at ``shape.encoder_seq_len`` where
+    the architecture fixes one — Whisper always sees 1500 positions regardless of how long
+    the audio is — and otherwise at the configured length, which is the right default for
+    T5-style sequence-to-sequence training where source and target are comparable.
+
+    Returns ``None`` for a family with no measured coefficients, so the caller reports the
+    term as unknown and widens the interval rather than inventing a number.
+    """
+    coeffs = ENCODER_DECODER_COEFFS.get(shape.activation_family or "")
+    if coeffs is None:
+        return None
+
+    b = config.batch_size
+    h = shape.hidden
+    a = shape.heads
+    s_dec = seq_len
+    s_enc = shape.encoder_seq_len or seq_len
+    attn = coeffs["attn"]
+    dtype_scale = config.precision.activation_bytes / ACT_REFERENCE_DTYPE_BYTES
+
+    encoder = shape.layers * (
+        coeffs["enc_linear"] * h * s_enc
+        + (0.0 if config.flash_attention else attn * a * s_enc * s_enc)
+    )
+    # A decoder layer adds cross-attention: its scores are b*a*s_dec*s_enc, and its K/V
+    # projections run at the encoder length even though the layer is a decoder layer.
+    decoder = shape.decoder_layers * (
+        coeffs["dec_linear"] * h * s_dec
+        + coeffs["cross_kv"] * h * s_enc
+        + (0.0 if config.flash_attention else attn * a * s_dec * s_dec)
+        + (0.0 if config.flash_attention else attn * a * s_dec * s_enc)
+    )
+    total = (encoder + decoder) * b
+
+    if config.gradient_checkpointing:
+        stored = CHECKPOINT_ACT_COEFF * b * h * (
+            shape.layers * s_enc + shape.decoder_layers * s_dec
+        )
+        live = total / max(shape.layers + shape.decoder_layers, 1)
+        return int((stored + live) * dtype_scale)
+    if config.inference_only:
+        live_fraction = INFERENCE_LIVE_LAYERS / max(
+            shape.layers + shape.decoder_layers, 1
+        )
+        return int(total * live_fraction * dtype_scale)
+    return int(total * dtype_scale)
 
 
 def cnn_activation_bytes(profile: ModelProfile, config: RunConfig) -> Optional[int]:
@@ -192,6 +271,17 @@ def lm_head_bytes(shape: TransformerShape, config: RunConfig, seq_len: int) -> i
 def _activation_bytes(profile: ModelProfile, config: RunConfig) -> Optional[int]:
     if profile.activation_bytes_per_sample is not None:
         return cnn_activation_bytes(profile, config)
+
+    if profile.shape is not None and profile.shape.is_encoder_decoder:
+        seq_len = config.seq_len or profile.shape.max_position
+        if seq_len:
+            stack = encoder_decoder_activation_bytes(profile.shape, config, seq_len)
+            if stack is None:
+                return None
+            # The seq2seq head projects decoder output to the vocabulary, exactly as a
+            # causal LM head does; it is validated by the same measurements.
+            return stack + lm_head_bytes(profile.shape, config, seq_len)
+        return None
 
     if profile.shape is not None:
         seq_len = config.seq_len or profile.shape.max_position
@@ -373,6 +463,13 @@ def params_from_transformer_shape(shape: TransformerShape) -> int:
     per_layer += 4 * h
 
     total = per_layer * shape.layers
+
+    # An encoder-decoder stacks a decoder on top, and every decoder layer carries a second
+    # attention block (cross-attention) on top of its own self-attention.
+    if shape.is_encoder_decoder:
+        cross_attention = 2 * h * h + 2 * h * h * kv_ratio + 2 * h
+        total += (per_layer + cross_attention) * shape.decoder_layers
+
     total += shape.vocab * h                      # token embeddings
     if not shape.tied_embeddings:
         total += shape.vocab * h                  # separate output head

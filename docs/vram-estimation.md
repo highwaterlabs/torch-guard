@@ -150,7 +150,9 @@ guessing a parameter count.
 - Calibration covers one GPU (T4) and four model families. `CUDA_CONTEXT_BYTES` in
   particular is a single data point; larger cards plausibly differ, and
   `hardware.Gpu.context_mib` exists to hold per-card numbers as they arrive.
-- Encoder-decoder models (T5, Whisper) have parameter counts but no activation model.
+- Encoder-decoder families beyond T5 and Whisper (BART, Pegasus, MarianMT) have no
+  measured coefficients, so they report activations as unknown rather than borrowing
+  another family's numbers.
 
 ## Guarding a run at runtime
 

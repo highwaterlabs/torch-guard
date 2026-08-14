@@ -1,0 +1,71 @@
+{
+  "torch_version": "2.13.0",
+  "method": "saved_tensors_hooks on torch.device('meta'); encoder measured alone to break collinearity with the cross-KV term; the quadratic attention coefficient is constrained to the separately measured 6.0/2.0 because Whisper's fixed encoder length and constant head_dim make the linear/quadratic split unidentifiable",
+  "reference_dtype_bytes": 2,
+  "families": {
+    "t5": {
+      "enc_linear": 48.436866554054056,
+      "dec_linear": 60.58391399211711,
+      "cross_kv": 4.054617117117114,
+      "attn": 6.0,
+      "encoder_seq_len": null,
+      "models": {
+        "t5-small": {
+          "layers_enc": 6,
+          "layers_dec": 6,
+          "hidden": 512,
+          "heads": 8,
+          "uses_dropout": true
+        },
+        "t5-base": {
+          "layers_enc": 12,
+          "layers_dec": 12,
+          "hidden": 768,
+          "heads": 12,
+          "uses_dropout": true
+        },
+        "t5-large": {
+          "layers_enc": 24,
+          "layers_dec": 24,
+          "hidden": 1024,
+          "heads": 16,
+          "uses_dropout": true
+        }
+      },
+      "encoder_residual_max_pct": 2.4952793113940124,
+      "decoder_residual_max_pct": 2.567407963973815
+    },
+    "whisper": {
+      "enc_linear": 33.203823678861795,
+      "dec_linear": 40.20954014227648,
+      "cross_kv": 4.191056910569105,
+      "attn": 2.0,
+      "encoder_seq_len": 1500,
+      "models": {
+        "openai/whisper-tiny": {
+          "layers_enc": 4,
+          "layers_dec": 4,
+          "hidden": 384,
+          "heads": 6,
+          "uses_dropout": false
+        },
+        "openai/whisper-base": {
+          "layers_enc": 6,
+          "layers_dec": 6,
+          "hidden": 512,
+          "heads": 8,
+          "uses_dropout": false
+        },
+        "openai/whisper-small": {
+          "layers_enc": 12,
+          "layers_dec": 12,
+          "hidden": 768,
+          "heads": 12,
+          "uses_dropout": false
+        }
+      },
+      "encoder_residual_max_pct": 5.756018237246446,
+      "decoder_residual_max_pct": 5.889705795066568
+    }
+  }
+}
