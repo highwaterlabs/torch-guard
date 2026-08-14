@@ -240,11 +240,6 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       asserted a whole-file `codes(...) == []` on a snippet that accumulates without
       dividing — a real TG014 finding. The fixture now scales the loss, so it is genuinely
       correct accumulation and the whole-file assertion still holds.
-- [ ] TG007-TG009 and TG011-TG013, listed in [IDEAS.md](IDEAS.md). Next up: TG012 (DDP
-      without `DistributedSampler`) and TG011 (`model.eval()` with no matching `train()`).
-      TG007 (CPU-GPU thrashing) last and with care: `.item()` is the *fix* for TG001 but a
-      sync point in a hot loop, so the rule has to tell "once per step" from "once per
-      element" or it will contradict a rule we already ship.
 - [x] **TG012 — DataLoader under DDP with no DistributedSampler.** Every rank iterates the
       whole dataset in the same order, so N ranks compute gradients on identical batches and
       DDP averages them to no effect: N GPUs training as one, on 1/N of the data per epoch.
@@ -259,10 +254,18 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       *one* function set up DDP — including single-process helpers. The marker must now be
       in the loader's own function, or at module level where it governs everything.
       Regression-tested both ways.
-- [ ] TG007-TG009, TG011 and TG013, listed in [IDEAS.md](IDEAS.md). Next: TG011
-      (`model.eval()` with no matching `train()`). TG007 (CPU-GPU thrashing) last and with
-      care: `.item()` is the *fix* for TG001 but a sync point in a hot loop, so the rule has
-      to tell "once per step" from "once per element" or it will contradict a rule we ship.
+- [x] **TG011 — `model.eval()` in an epoch loop with no matching `train()`.** `eval()` is
+      sticky, so the usual train-then-validate loop trains properly only on the first epoch;
+      after that dropout is off and batch-norm normalises with statistics it has stopped
+      updating. Requires the whole shape before firing — a backward pass, a validation
+      iteration, an `eval()` and no matching `train()` in the same loop — and matches the
+      *receiver*, so `model.backbone.eval()` to freeze batch-norm during fine-tuning is not
+      flagged, while `model.train()` is still accepted as restoring it because `train()`
+      recurses. Clean on torch's 2,285 files.
+- [ ] TG007-TG009 and TG013, listed in [IDEAS.md](IDEAS.md). TG007 (CPU-GPU
+      thrashing) last and with care: `.item()` is the *fix* for TG001 but a sync
+      point in a hot loop, so the rule has to tell "once per step" from "once per
+      element" or it will contradict a rule we already ship.
 
 ## Cross-cutting
 

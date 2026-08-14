@@ -34,7 +34,7 @@ def train(model, dataset, val_dataset, device):
     total_loss = 0.0
 
     for epoch in range(10):
-        model.train()
+        # TG011: no model.train() here, so only epoch 0 trains with dropout on
         for images, targets in loader:
             images = images.to(device)
             logits = model(images)

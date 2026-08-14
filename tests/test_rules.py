@@ -430,7 +430,7 @@ def test_bad_example_triggers_every_rule():
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
     assert {d.code for d in diagnostics} == {
-        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG012", "TG014",
+        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG011", "TG012", "TG014",
     }
 
 
@@ -1073,4 +1073,109 @@ def test_tg012_fires_when_the_process_group_is_at_module_level():
         def train(dataset):
             return DataLoader(dataset, batch_size=32, shuffle=True)
         """
+    )
+
+
+# --------------------------------------------------------------------- TG011
+
+
+def epoch_loop(*, train_call: str = "", eval_receiver: str = "model") -> str:
+    """A train-then-validate epoch loop, with the `train()` call placed by the caller."""
+    return (
+        "import torch\n"
+        "def fit(model, train_loader, val_loader, optimizer, criterion):\n"
+        "    for epoch in range(10):\n"
+        f"{train_call}"
+        "        for x, y in train_loader:\n"
+        "            loss = criterion(model(x), y)\n"
+        "            optimizer.zero_grad()\n"
+        "            loss.backward()\n"
+        "            optimizer.step()\n"
+        f"        {eval_receiver}.eval()\n"
+        "        for x, y in val_loader:\n"
+        "            model(x)\n"
+    )
+
+
+def test_tg011_flags_eval_with_no_train_in_the_epoch_loop():
+    assert "TG011" in codes(epoch_loop())
+
+
+def test_tg011_silent_when_train_is_called_each_epoch():
+    assert "TG011" not in codes(epoch_loop(train_call="        model.train()\n"))
+
+
+def test_tg011_flags_train_called_only_before_the_loop():
+    """The classic shape: `model.train()` once outside, so only epoch one trains properly."""
+    source = (
+        "import torch\n"
+        "def fit(model, train_loader, val_loader, optimizer, criterion):\n"
+        "    model.train()\n"
+        "    for epoch in range(10):\n"
+        "        for x, y in train_loader:\n"
+        "            loss = criterion(model(x), y)\n"
+        "            loss.backward()\n"
+        "            optimizer.step()\n"
+        "        model.eval()\n"
+        "        for x, y in val_loader:\n"
+        "            model(x)\n"
+    )
+    assert "TG011" in codes(source)
+
+
+def test_tg011_silent_for_a_deliberately_frozen_submodule():
+    """`model.backbone.eval()` freezes batch-norm for fine-tuning and is not undone by
+    `model.train()` — pairing them would both hide a real bug and invent a fake one."""
+    assert "TG011" not in codes(
+        epoch_loop(train_call="        model.train()\n", eval_receiver="model.backbone")
+    )
+
+
+def test_tg011_silent_without_a_backward_pass():
+    """An evaluation-only script never trains, so eval mode cannot be stuck."""
+    assert "TG011" not in codes(
+        """
+        def evaluate(model, test_loader):
+            for epoch in range(3):
+                model.eval()
+                for x, y in test_loader:
+                    model(x)
+        """
+    )
+
+
+def test_tg011_silent_without_a_validation_pass():
+    """`eval()` with no validation iteration is some other pattern; do not guess at it."""
+    assert "TG011" not in codes(
+        """
+        def fit(model, train_loader, optimizer, criterion):
+            for epoch in range(10):
+                model.eval()
+                for x, y in train_loader:
+                    loss = criterion(model(x), y)
+                    loss.backward()
+                    optimizer.step()
+        """
+    )
+
+
+def test_tg011_silent_outside_any_loop():
+    assert "TG011" not in codes(
+        """
+        def once(model, train_loader, val_loader, optimizer, criterion):
+            for x, y in train_loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+                optimizer.step()
+            model.eval()
+            for x, y in val_loader:
+                model(x)
+        """
+    )
+
+
+def test_tg011_accepts_train_mode_restored_on_the_parent_module():
+    """`model.train()` recurses, so it does restore `model.backbone.eval()`."""
+    assert "TG011" not in codes(
+        epoch_loop(train_call="        model.train()\n", eval_receiver="model.backbone.bn")
     )
