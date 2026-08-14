@@ -77,6 +77,8 @@ class _Extractor(ScopeTrackingVisitor):
         self.dict_literals: Dict[str, cst.Dict] = {}
         #: True when a DeepSpeed stage had to be assumed rather than read.
         self.deepspeed_stage_guessed = False
+        self.offload_optimizer = False
+        self.offload_params = False
         self.sources: Dict[str, str] = {}
 
         self.batch_candidates: List[Tuple[int, bool, int]] = []  # (value, is_eval, line)
@@ -341,7 +343,14 @@ class _Extractor(ScopeTrackingVisitor):
             keyword_arg(node, keyword) if keyword
             else keyword_arg(node, "config") or keyword_arg(node, "config_params")
         )
-        stage = self._zero_stage_from(config.value) if config is not None else None
+        zero = self._zero_section(config.value) if config is not None else None
+        stage = self._stage_of(zero)
+
+        if zero is not None:
+            # ``offload_optimizer`` / ``offload_param`` are dicts (``{"device": "cpu"}``);
+            # their mere presence is what enables offload.
+            self.offload_optimizer = self._has_key(zero, "offload_optimizer")
+            self.offload_params = self._has_key(zero, "offload_param")
 
         if stage is None:
             self.sharding = Sharding.ZERO2
@@ -350,17 +359,18 @@ class _Extractor(ScopeTrackingVisitor):
         self.sharding = self._ZERO_STAGES.get(stage, Sharding.ZERO2)
         self.deepspeed_stage_guessed = False
 
-    def _zero_stage_from(self, value: cst.BaseExpression) -> Optional[int]:
+    def _zero_section(self, value: cst.BaseExpression):
+        """The ``zero_optimization`` block, as a CST ``Dict`` or a plain dict from JSON."""
         if isinstance(value, cst.Name):
             literal = self.dict_literals.get(value.value)
-            return self._stage_in_dict(literal) if literal is not None else None
+            return self._zero_in_dict(literal) if literal is not None else None
         if isinstance(value, cst.Dict):
-            return self._stage_in_dict(value)
+            return self._zero_in_dict(value)
         if isinstance(value, cst.SimpleString):
-            return self._stage_in_json(_string_value(value))
+            return self._zero_in_json(_string_value(value))
         return None
 
-    def _stage_in_dict(self, node: cst.Dict) -> Optional[int]:
+    def _zero_in_dict(self, node: cst.Dict) -> Optional[cst.Dict]:
         for element in node.elements:
             if not isinstance(element, cst.DictElement):
                 continue
@@ -369,17 +379,35 @@ class _Extractor(ScopeTrackingVisitor):
                 continue
             if _string_value(key) != "zero_optimization":
                 continue
-            if not isinstance(element.value, cst.Dict):
-                continue
-            for inner in element.value.elements:
-                if not isinstance(inner, cst.DictElement):
-                    continue
-                if isinstance(inner.key, cst.SimpleString) and _string_value(inner.key) == "stage":
-                    return self._int_of(inner.value)
+            if isinstance(element.value, cst.Dict):
+                return element.value
         return None
 
-    def _stage_in_json(self, relative: str) -> Optional[int]:
-        """Read ``zero_optimization.stage`` from a JSON config beside the source file.
+    def _stage_of(self, zero) -> Optional[int]:
+        if zero is None:
+            return None
+        if isinstance(zero, dict):
+            stage = zero.get("stage")
+            return stage if isinstance(stage, int) else None
+        for inner in zero.elements:
+            if not isinstance(inner, cst.DictElement):
+                continue
+            if isinstance(inner.key, cst.SimpleString) and _string_value(inner.key) == "stage":
+                return self._int_of(inner.value)
+        return None
+
+    def _has_key(self, zero, name: str) -> bool:
+        if isinstance(zero, dict):
+            return zero.get(name) is not None
+        for inner in zero.elements:
+            if not isinstance(inner, cst.DictElement):
+                continue
+            if isinstance(inner.key, cst.SimpleString) and _string_value(inner.key) == name:
+                return True
+        return False
+
+    def _zero_in_json(self, relative: str) -> Optional[dict]:
+        """Read the ``zero_optimization`` block from a JSON config beside the source file.
 
         Reading a JSON file is not executing code, which is the line that matters for
         ``check``. Any failure -- missing file, bad JSON, absolute path outside the tree --
@@ -399,10 +427,7 @@ class _Extractor(ScopeTrackingVisitor):
         if not isinstance(data, dict):
             return None
         zero = data.get("zero_optimization")
-        if not isinstance(zero, dict):
-            return None
-        stage = zero.get("stage")
-        return stage if isinstance(stage, int) else None
+        return zero if isinstance(zero, dict) else None
 
     def _check_model_ref(self, node: cst.Call, leaf: str) -> None:
         if leaf != "from_pretrained" or self.model_ref is not None:
@@ -488,6 +513,8 @@ def extract(ctx: FileContext) -> ExtractedConfig:
         accumulation_steps=extractor.accumulation,
         world_size=extractor.world_size,
         sharding=extractor.sharding,
+        offload_optimizer=extractor.offload_optimizer,
+        offload_params=extractor.offload_params,
         inference_only=not extractor.saw_backward,
         sources=extractor.sources,
     )

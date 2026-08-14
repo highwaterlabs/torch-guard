@@ -157,9 +157,17 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       the source tree is refused, and missing or malformed JSON degrades quietly.
       This matters: stage 3 shards parameters too, so it is the difference between a 70B
       model fitting and not.
-- [ ] DeepSpeed **offload** (`offload_optimizer` / `offload_param`) moves state to CPU and
-      is now visible in the configs we parse, but is not modelled — we still charge it to
-      the GPU, which over-estimates offloaded runs.
+- [x] **DeepSpeed `offload_optimizer` modelled.** ZeRO-Offload runs the optimizer step in
+      CPU memory, so neither the optimizer state nor the fp32 master copy is resident. For
+      AdamW that is 8 bytes per parameter plus a 4-byte master copy — usually the largest
+      single term, and the reason people enable offload. On llama-2-7b at ZeRO-3 across 8
+      ranks it takes the projection from 23.79 GiB to 13.38 GiB.
+- [ ] **`offload_param` is read but deliberately not subtracted.** It streams parameters in
+      per layer, so only a working set is resident — but how large depends on prefetch depth
+      and `param_persistence_threshold`, and we have not measured it. Rather than invent a
+      fraction the full weights term stands and the report says the real peak is lower.
+      Over-estimating is the safe direction for an OOM tool. Measuring the resident set
+      would close this.
 - [x] **GitHub Actions pins bumped off Node 20**: checkout v4->v7, setup-python v5->v7,
       upload-artifact v4->v7, download-artifact v4->v8. Rehearsed on `main` via
       `workflow_dispatch` and green.

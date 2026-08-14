@@ -149,6 +149,13 @@ fabricated "95% failure risk" probability, because there is no data to calibrate
 against. If the model cannot be identified, torch-preflight reports `UNKNOWN` rather than
 guessing a parameter count.
 
+DeepSpeed configs are read rather than assumed: the ZeRO stage comes from
+`zero_optimization.stage` in the dict literal or the JSON file your script points at, and
+`offload_optimizer` removes the optimizer state and fp32 master copy from the device, since
+ZeRO-Offload runs that step in CPU memory. `offload_param` is detected but **not** subtracted
+— the resident working set depends on prefetch depth and hasn't been measured here, so the
+weights term stands and the report tells you the real peak is lower.
+
 **Known gaps**, tracked in [design/TODO.md](../design/TODO.md):
 
 - The LM-head cost per logit element is **not batch-invariant** in the measurements —

@@ -253,6 +253,12 @@ class RunConfig:
     accumulation_steps: int = 1
     world_size: int = 1
     sharding: Sharding = Sharding.NONE
+    #: DeepSpeed ZeRO-Offload: optimizer state and the fp32 master copy live in CPU memory
+    #: rather than on the device. Read from ``zero_optimization.offload_optimizer``.
+    offload_optimizer: bool = False
+    #: ``zero_optimization.offload_param``. Recorded but deliberately not subtracted from
+    #: the weights term -- see the note in ``costmodel``.
+    offload_params: bool = False
     #: Fraction of parameters frozen (LoRA, frozen backbone) — no grad or optimizer state.
     frozen_fraction: float = 0.0
     inference_only: bool = False

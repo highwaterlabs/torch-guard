@@ -350,15 +350,36 @@ def estimate(
 
     if not config.inference_only:
         breakdown.gradients = int(trainable * precision.grad_bytes / grad_div)
-        breakdown.optimizer_state = int(
-            trainable * config.optimizer.states * config.optimizer.bytes_per_state / opt_div
-        )
-        breakdown.master_weights = int(
-            trainable * precision.master_copy_bytes / opt_div
-        )
+        if config.offload_optimizer:
+            # ZeRO-Offload moves optimizer state *and* the fp32 master copy into CPU
+            # memory, and runs the optimizer step there. Neither occupies the device, which
+            # is the entire point of the feature: for Adam that is 8 bytes per parameter
+            # plus a 4-byte master copy, usually the largest term for a large model.
+            breakdown.optimizer_state = 0
+            breakdown.master_weights = 0
+        else:
+            breakdown.optimizer_state = int(
+                trainable * config.optimizer.states * config.optimizer.bytes_per_state
+                / opt_div
+            )
+            breakdown.master_weights = int(
+                trainable * precision.master_copy_bytes / opt_div
+            )
 
     # autocast holds its casted weight copies through the backward pass, in inference too.
     breakdown.autocast_cache = int(params * precision.cast_cache_bytes / param_div)
+
+    if config.offload_params:
+        # `offload_param` streams parameters in per layer, so only a working set is
+        # resident -- but how large that set is depends on prefetch depth and
+        # `param_persistence_threshold`, and we have not measured it. Rather than invent a
+        # fraction, the full weights term stands and the report says it is high. Over-
+        # estimating is the safe direction for a tool whose job is predicting OOM.
+        notes.append(
+            "DeepSpeed `offload_param` is enabled, which keeps only a working set of "
+            "parameters on the device. The weights term below is the full size, so the "
+            "real peak will be lower than shown."
+        )
 
     activations = _activation_bytes(profile, config)
     if activations is None:
