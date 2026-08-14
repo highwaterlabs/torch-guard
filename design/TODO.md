@@ -147,7 +147,8 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       "fused attention is not a blind spot" holds for plain SDPA but not for this flag.
 - [ ] **KV cache is not modelled at all.** Irrelevant for training, but it dominates
       inference memory and is the place GQA genuinely pays off (8x on Llama-3-70B).
-      `--inference-only` currently just scales the activation term.- [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
+      `--inference-only` currently just scales the activation term.
+- [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
       a JSON config we cannot read", which was untrue: it is either a dict literal in the
       same file or a path to a JSON file beside it, and reading JSON is not executing code.
       Handles `deepspeed.initialize(config=...)` by path, by variable and inline, plus
@@ -249,18 +250,16 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       now fails and warns on configurations it previously waved through. Every release gate
       was run locally before tagging, because a PyPI version number can never be reused.
       Releases exist for both versions; repo description, topics and logo are set.
-- [ ] Bump the GitHub Actions pins. `actions/checkout@v4`, `setup-python@v5` and
-      `upload/download-artifact@v4` all target Node 20, which is deprecated — the runner
-      forces them onto Node 24 and everything passes, so this is not urgent yet.
 - [x] *Declined:* renaming the local working directory from `torch-guard` to
       `torch-preflight`. Kept as-is deliberately.
 - [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-preflight-cloud/`.
 - [x] Replaced the hardcoded test-count badge with live PyPI version, Python-version and
       licence badges, which update themselves.
-- [ ] **Delete the merged branches from the remote.** Five are fully merged into `main`
+- [ ] **Delete the merged branches from the remote.** Eight are fully merged into `main`
       and still there: `calibration/cnn-and-lm-head`, `docs/colab-download-fix`,
-      `fix/guard-activation-measurement`, `feat/tg006-bce-logits` and
-      `chore/zero-stage-and-snapshot`. An earlier entry claimed this was already done
+      `fix/guard-activation-measurement`, `feat/tg006-bce-logits`,
+      `chore/zero-stage-and-snapshot`, `chore/todo-reconcile`, `feat/gqa-activations`
+      and `feat/encoder-decoder-shapes`. An earlier entry claimed this was already done
       "locally and on the remote", which was only ever true locally.
 - [x] **Snapshot refresh process defined**: `tests/calibration/verify_snapshot.py`
       compares the bundled snapshot against the live hub configs. Deliberately a verifier
