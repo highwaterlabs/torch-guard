@@ -10,6 +10,7 @@
 | **TG006** | error | `CONVERGENCE_BUG` | Binary cross-entropy paired with the wrong activation — `sigmoid` before `BCEWithLogitsLoss`, or raw logits into `BCELoss` |
 | **TG012** | error | `CONVERGENCE_BUG` | `DataLoader` under DDP with no `DistributedSampler` — every rank trains on identical batches |
 | **TG014** | error | `CONVERGENCE_BUG` | Gradient accumulation without dividing the loss — summed gradients scaled as if averaged, equivalent to an N× learning rate |
+| **TG011** | error | `CONVERGENCE_BUG` | `model.eval()` in an epoch loop with no matching `train()` — only the first epoch trains properly |
 | **TG010** | error | `CRITICAL_OOM` | Projected peak VRAM exceeds the configured `target_gpu` — see [VRAM estimation](vram-estimation.md) |
 
 `torch-preflight explain TG001` prints the full write-up for any rule, including why it costs
