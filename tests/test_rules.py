@@ -228,13 +228,19 @@ def test_tg003_quiet_when_zero_grad_present():
 
 
 def test_tg003_quiet_for_gradient_accumulation():
-    """``zero_grad`` guarded by an ``if`` is deliberate accumulation, not a bug."""
+    """``zero_grad`` guarded by an ``if`` is deliberate accumulation, not a bug.
+
+    The loss is divided by ``accum`` here so the snippet is *correct* accumulation and the
+    assertion stays a whole-file one. Without the division it is a real TG014 finding --
+    summed gradients scaled as if they had been averaged -- which is what this fixture used
+    to contain.
+    """
     assert codes(
         """
         def train(model, loader, criterion, optimizer, accum=4):
             for i, (batch, y) in enumerate(loader):
                 loss = criterion(model(batch), y)
-                loss.backward()
+                (loss / accum).backward()
                 if (i + 1) % accum == 0:
                     optimizer.step()
                     optimizer.zero_grad()
@@ -424,7 +430,7 @@ def test_bad_example_triggers_every_rule():
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
     assert {d.code for d in diagnostics} == {
-        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006",
+        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG014",
     }
 
 
@@ -806,3 +812,136 @@ def test_tg006_silent_without_any_bce_loss():
                 self.net = nn.Sequential(nn.Linear(4, 1), nn.Sigmoid())
         """
     )
+
+
+# --------------------------------------------------------------------- TG014
+
+
+ACCUMULATION_LOOP = """
+    import torch
+    def train(model, loader, optimizer):
+        accumulation_steps = 4
+        for i, (x, y) in enumerate(loader):
+            loss = torch.nn.functional.cross_entropy(model(x), y)
+            {backward}
+            if (i + 1) % accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+    """
+
+
+def test_tg014_flags_accumulation_without_scaling():
+    assert "TG014" in codes(ACCUMULATION_LOOP.format(backward="loss.backward()"))
+
+
+def test_tg014_silent_when_scaled_inline():
+    assert "TG014" not in codes(
+        ACCUMULATION_LOOP.format(backward="(loss / accumulation_steps).backward()")
+    )
+
+
+def test_tg014_silent_when_scaled_by_reassignment():
+    assert "TG014" not in codes(
+        ACCUMULATION_LOOP.format(
+            backward="loss = loss / accumulation_steps\n            loss.backward()"
+        )
+    )
+
+
+def test_tg014_silent_when_scaled_in_place():
+    assert "TG014" not in codes(
+        ACCUMULATION_LOOP.format(
+            backward="loss /= accumulation_steps\n            loss.backward()"
+        )
+    )
+
+
+def test_tg014_silent_without_an_accumulation_guard():
+    """One optimizer step per backward: nothing accumulates, so nothing needs scaling."""
+    assert "TG014" not in codes(
+        """
+        import torch
+        def train(model, loader, optimizer):
+            for x, y in loader:
+                loss = torch.nn.functional.cross_entropy(model(x), y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+        """
+    )
+
+
+def test_tg014_handles_an_integer_divisor():
+    assert "TG014" in codes(
+        """
+        def train(model, loader, optimizer):
+            for i, (x, y) in enumerate(loader):
+                loss = model(x).sum()
+                loss.backward()
+                if i % 8 == 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+        """
+    )
+
+
+def test_tg014_ignores_modulo_one():
+    """`% 1` is every iteration, which is not accumulation, and dividing by 1 is a no-op."""
+    assert "TG014" not in codes(
+        """
+        def train(model, loader, optimizer):
+            for i, (x, y) in enumerate(loader):
+                loss = model(x).sum()
+                loss.backward()
+                if i % 1 == 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+        """
+    )
+
+
+def test_tg014_silent_when_a_framework_owns_the_scaling():
+    """Accelerate divides internally; telling someone to divide again introduces a bug."""
+    assert "TG014" not in codes(
+        """
+        from accelerate import Accelerator
+        def train(model, loader, optimizer, accelerator):
+            for i, (x, y) in enumerate(loader):
+                with accelerator.accumulate(model):
+                    loss = model(x).sum()
+                    accelerator.backward(loss)
+                    optimizer.step()
+                    optimizer.zero_grad()
+        """
+    )
+
+
+def test_tg014_silent_for_a_scheduler_step():
+    """`scheduler.step()` applies no gradients, so a modulo around it is not accumulation."""
+    assert "TG014" not in codes(
+        """
+        def train(model, loader, optimizer, scheduler):
+            for i, (x, y) in enumerate(loader):
+                loss = model(x).sum()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                if i % 100 == 0:
+                    scheduler.step()
+        """
+    )
+
+
+def test_tg014_autofix_divides_only_what_autograd_sees():
+    """`(loss / N).backward()` keeps any later logging of `loss` reporting the same value."""
+    import textwrap
+
+    from torch_preflight.engine import check_source
+    from torch_preflight.fixer import apply_fixes
+
+    source = textwrap.dedent(ACCUMULATION_LOOP.format(backward="loss.backward()")).lstrip("\n")
+    diagnostics, ctx = check_source("t.py", source)
+    fixed, applied = apply_fixes(ctx.module, [d for d in diagnostics if d.code == "TG014"])
+    assert applied, "the TG014 fix should have applied"
+    assert "(loss / accumulation_steps).backward()" in fixed
+    assert "loss = torch.nn.functional.cross_entropy" in fixed, "must not touch the loss line"

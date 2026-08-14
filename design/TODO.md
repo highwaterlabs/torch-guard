@@ -222,10 +222,25 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
         `nn.Sigmoid()` construction in a file that mentioned `BCEWithLogitsLoss` anywhere.
         A bare `sigmoid = nn.Sigmoid()` local used to build a reference implementation is
         not a model ending in a sigmoid; only final position in an `nn.Sequential` is.
-- [ ] TG007-TG009 and TG011-TG014, listed in [IDEAS.md](IDEAS.md). TG007 (CPU-GPU
-      thrashing) needs care: `.item()` is the *fix* for TG001 but a sync point in a hot
-      loop, so the rule has to tell "once per step" from "once per element" or it will
-      contradict a rule we already ship.
+- [x] **TG014 — gradient accumulation without scaling the loss.** Keys off the modulo
+      guard (`if (i + 1) % accum == 0: optimizer.step()`) rather than a variable name,
+      because that guard *is* what makes several backward passes share one step. Silent
+      when the loss is divided inline, by reassignment or with `/=`, and when a framework
+      owns the scaling (Accelerate, HF Trainer, Lightning, DeepSpeed all divide internally,
+      so telling someone to divide again would introduce the mirror-image bug). Autofix
+      rewrites `loss.backward()` as `(loss / N).backward()`, which scales only what
+      autograd sees so later logging of `loss` reports the same value as before. Clean on
+      torch's 2,285 files.
+
+      Also corrected a TG003 fixture: `test_tg003_quiet_for_gradient_accumulation`
+      asserted a whole-file `codes(...) == []` on a snippet that accumulates without
+      dividing — a real TG014 finding. The fixture now scales the loss, so it is genuinely
+      correct accumulation and the whole-file assertion still holds.
+- [ ] TG007-TG009 and TG011-TG013, listed in [IDEAS.md](IDEAS.md). Next up: TG012 (DDP
+      without `DistributedSampler`) and TG011 (`model.eval()` with no matching `train()`).
+      TG007 (CPU-GPU thrashing) last and with care: `.item()` is the *fix* for TG001 but a
+      sync point in a hot loop, so the rule has to tell "once per step" from "once per
+      element" or it will contradict a rule we already ship.
 
 ## Cross-cutting
 

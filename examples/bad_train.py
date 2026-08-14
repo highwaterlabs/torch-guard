@@ -70,6 +70,20 @@ def train_binary(model, loader, device):
         optimizer.step()
 
 
+def train_with_accumulation(model, loader, device):
+    """Gradient accumulation, but the loss is never scaled."""
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    accumulation_steps = 4
+
+    for step, (images, targets) in enumerate(loader):
+        loss = criterion(model(images.to(device)), targets)
+        loss.backward()  # TG014: summed over 4 micro-batches, never divided by 4
+        if (step + 1) % accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+
 def evaluate(model, loader, device):
     """TG002: an eval routine with no @torch.no_grad()."""
     correct = 0
