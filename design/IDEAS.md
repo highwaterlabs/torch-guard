@@ -16,7 +16,6 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   `random`. Also `DataLoader(shuffle=True)` with no `generator=`.
 - **TG009** in-place ops on tensors needed for backward (`x += 1` vs `x = x + 1`). The one
   rule here that genuinely needs alias analysis — probably its own RFC.
-- **TG013** `.to(device)` inside the inner loop instead of hoisted.
 
 ## Analysis engine
 

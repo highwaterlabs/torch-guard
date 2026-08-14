@@ -33,10 +33,13 @@ def train(model, dataset, val_dataset, device):
     losses = []
     total_loss = 0.0
 
+    class_weights = torch.ones(10)
+
     for epoch in range(10):
         # TG011: no model.train() here, so only epoch 0 trains with dropout on
         for images, targets in loader:
             images = images.to(device)
+            weights = class_weights.to(device)  # TG013: same copy every iteration
             logits = model(images)
             loss = criterion(logits, targets)
             loss.backward()          # TG003: nothing calls optimizer.zero_grad()

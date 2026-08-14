@@ -430,7 +430,8 @@ def test_bad_example_triggers_every_rule():
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
     assert {d.code for d in diagnostics} == {
-        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG011", "TG012", "TG014",
+        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG011", "TG012",
+        "TG013", "TG014",
     }
 
 
@@ -1178,4 +1179,118 @@ def test_tg011_accepts_train_mode_restored_on_the_parent_module():
     """`model.train()` recurses, so it does restore `model.backbone.eval()`."""
     assert "TG011" not in codes(
         epoch_loop(train_call="        model.train()\n", eval_receiver="model.backbone.bn")
+    )
+
+
+# --------------------------------------------------------------------- TG013
+
+
+def transfer_loop(*body: str) -> str:
+    lines = "\n".join(f"        {line}" for line in body)
+    return (
+        "import torch\n"
+        "def train(model, loader, optimizer, criterion, class_weights, device):\n"
+        "    for x, y in loader:\n"
+    ) + lines
+
+
+def test_tg013_flags_a_loop_invariant_transfer():
+    assert "TG013" in codes(transfer_loop("w = class_weights.to(device)", "model(x)"))
+
+
+def test_tg013_flags_a_host_factory_then_transfer():
+    assert "TG013" in codes(transfer_loop("idx = torch.tensor([0, 1]).to(device)", "model(x)"))
+
+
+def test_tg013_flags_moving_the_model_every_iteration():
+    assert "TG013" in codes(transfer_loop("model.to(device)", "model(x)"))
+
+
+def test_tg013_silent_for_the_batch_transfer():
+    """`x.to(device)` on the loop variable is the whole point of the loop."""
+    assert "TG013" not in codes(transfer_loop("xb = x.to(device)", "model(xb)"))
+
+
+def test_tg013_silent_for_self_assignment():
+    """`Tensor.to` returns self when already resident, so only iteration one copies."""
+    assert "TG013" not in codes(
+        transfer_loop("class_weights = class_weights.to(device)", "model(x)")
+    )
+
+
+def test_tg013_silent_when_the_factory_already_targets_the_device():
+    assert "TG013" not in codes(
+        transfer_loop("buf = torch.zeros(4, device=device)", "model(x)")
+    )
+
+
+def test_tg013_silent_for_a_dtype_cast():
+    """`.to(dtype)` is not a transfer. Reading it as one produced false positives in
+    torch's own FSDP code, so a device move now needs positive evidence."""
+    assert "TG013" not in codes(transfer_loop("half = x.to(torch.float16)", "model(half)"))
+
+
+def test_tg013_silent_for_a_bare_dtype_variable():
+    assert "TG013" not in codes(transfer_loop("cast = x.to(dtype)", "model(cast)"))
+
+
+def test_tg013_silent_when_the_destination_varies_per_iteration():
+    """`clip_coef.to(device)` inside `for device, grads in ...` cannot be hoisted.
+
+    Regression: found in torch's own `clip_grad`, where the loop iterates *over devices*.
+    """
+    assert "TG013" not in codes(
+        """
+        def clip(grouped_grads, clip_coef_clamped):
+            for device, grads in grouped_grads.items():
+                torch._foreach_mul_(grads, clip_coef_clamped.to(device))
+        """
+    )
+
+
+def test_tg013_silent_for_a_comprehension_target():
+    """`[t.cuda(rank) for t in tensors]` iterates, but binds in a comprehension scope.
+
+    Regression: `bound_in_any_loop` does not see comprehension targets, which flagged every
+    one of these in torch's distributed tests.
+    """
+    assert "TG013" not in codes(
+        """
+        def move(tensors, rank):
+            for _ in range(3):
+                moved = [t.cuda(rank) for t in tensors]
+            return moved
+        """
+    )
+
+
+def test_tg013_silent_for_an_attribute_of_a_loop_variable():
+    """`for shard in shards: shard.tensor.to(device)` binds `shard`, not `shard.tensor`."""
+    assert "TG013" not in codes(
+        """
+        def gather(shards, device):
+            for shard in shards:
+                out = shard.tensor.to(device)
+            return out
+        """
+    )
+
+
+def test_tg013_does_not_tell_you_to_hoist_a_random_draw():
+    """`torch.randn(...)` must stay in the loop; only the double allocation is the problem."""
+    diagnostics = analyze(transfer_loop("noise = torch.randn(4).to(device)", "model(x)"))
+    found = [d for d in diagnostics if d.code == "TG013"]
+    assert found, "the double allocation is still worth reporting"
+    assert not any("once outside the loop" in (d.hint or "") for d in found), (
+        "hoisting a random draw would change the semantics"
+    )
+
+
+def test_tg013_silent_outside_any_loop():
+    assert "TG013" not in codes(
+        """
+        def setup(model, class_weights, device):
+            model.to(device)
+            return class_weights.to(device)
+        """
     )
