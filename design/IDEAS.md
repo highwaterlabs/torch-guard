@@ -20,7 +20,6 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   accuracy killer with batchnorm/dropout.
 - **TG012** DDP without `DistributedSampler`, so every rank trains on identical data.
 - **TG013** `.to(device)` inside the inner loop instead of hoisted.
-- **TG014** loss not divided by accumulation steps under gradient accumulation.
 
 ## Analysis engine
 
