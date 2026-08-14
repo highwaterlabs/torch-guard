@@ -90,11 +90,7 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       absolute error 4.4% -> 3.7%. Still *not* the fixture optimum of 14: GPT-2 is the only
       measured peak with an LM head, so that "fit" is two points again, and they disagree
       in sign.
-- [ ] **The per-logit cost is not batch-invariant** — ~19.7 bytes/logit at batch 4 against
-      ~14.7 at batch 8, consistently across all four vocabularies. A single constant cannot
-      express that, which is why GPT-2 at batch 8 stays ~12% under. Worth understanding
-      before adding a batch term: it is more likely an allocator reuse effect at peak than
-      a real difference in bytes required.
+- [ ] **The per-logit cost is not batch-invariant** — tracked in [#22](https://github.com/highwaterlabs/torch-preflight/issues/22).
 - [x] **`VRAMGuard` ignored activations entirely** — `profile_live_model` returns exact
       parameter counts and no shape, so the term silently read zero. Measured against a
       real ResNet-50 at batch 32 the guard projected 0.61 GiB where the card peaked at
@@ -105,9 +101,7 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [ ] **The guard's measurement is forward-only**, so for a language model it sees the
       logits but not the loss temporaries that peak during backward. The static estimator
       models those; the guard does not.
-- [ ] **Calibration covers one GPU.** `CUDA_CONTEXT_BYTES` is a single T4 data point;
-      `hardware.Gpu.context_mib` holds per-card overrides as more arrive. An A100/H100
-      run would be the most valuable next measurement.
+- [ ] **Calibration covers one GPU** — tracked in [#21](https://github.com/highwaterlabs/torch-preflight/issues/21).
 - [x] **Encoder-decoder activations measured** for T5 and Whisper (8 snapshot entries),
       so they estimate instead of reporting unknown. A decoder-only formula cannot express
       these: there are two sequence lengths, and a decoder layer carries a third attention
@@ -162,12 +156,8 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       AdamW that is 8 bytes per parameter plus a 4-byte master copy — usually the largest
       single term, and the reason people enable offload. On llama-2-7b at ZeRO-3 across 8
       ranks it takes the projection from 23.79 GiB to 13.38 GiB.
-- [ ] **`offload_param` is read but deliberately not subtracted.** It streams parameters in
-      per layer, so only a working set is resident — but how large depends on prefetch depth
-      and `param_persistence_threshold`, and we have not measured it. Rather than invent a
-      fraction the full weights term stands and the report says the real peak is lower.
-      Over-estimating is the safe direction for an OOM tool. Measuring the resident set
-      would close this.
+- [ ] **`offload_param` is read but deliberately not subtracted** — tracked in
+      [#24](https://github.com/highwaterlabs/torch-preflight/issues/24).
 - [x] **GitHub Actions pins bumped off Node 20**: checkout v4->v7, setup-python v5->v7,
       upload-artifact v4->v7, download-artifact v4->v8. Rehearsed on `main` via
       `workflow_dispatch` and green.
@@ -213,8 +203,8 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       Exported lazily from `torch_preflight` so the base install still never imports torch.
 - [x] Verification against `torch.cuda.max_memory_allocated()` on exit, exposed as
       `guard.measured_peak` and `guard.accuracy`.
-- [ ] Feed real `guard.accuracy` measurements back into the calibration fixtures — needs a
-      GPU session, same as the remaining CUDA constants.
+- [ ] Feed real `guard.accuracy` measurements into the calibration fixtures — tracked in
+      [#23](https://github.com/highwaterlabs/torch-preflight/issues/23).
 
 ### Rules beyond the first five
 
@@ -270,7 +260,31 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       *receiver*, so `model.backbone.eval()` to freeze batch-norm during fine-tuning is not
       flagged, while `model.train()` is still accepted as restoring it because `train()`
       recurses. Clean on torch's 2,285 files.
-- [ ] TG007-TG009 and TG013, listed in [IDEAS.md](IDEAS.md). TG007 (CPU-GPU
+- [x] **TG013 — a host-to-device transfer repeated every iteration.** Narrower than the
+      idea implied, deliberately: `.to(device)` is a *no-op* when the tensor is already
+      resident, so the naive "flag `.to()` in a loop" rule would mostly flag things that
+      cost nothing. Fires on three shapes that do cost: loop-invariant data copied each
+      step, a `torch.*` host factory built then transferred, and `model.to(device)` inside
+      the loop (no copy, but `Module.to` walks every parameter each time). Silent on batch
+      transfers, `x = x.to(device)` self-assignment, factories that already pass `device=`,
+      and dtype casts.
+
+      Triaging torch's source took it from **57 findings to 8**, and each round was a real
+      bug in the rule:
+      - dotted receivers were checked whole, so `for shard in shards: shard.tensor.to(...)`
+        did not count as loop-bound. Now the *root* name is what matters.
+      - `.to(dtype)` was read as a device move. Device targets now need positive evidence —
+        `.cuda()`, `device=`, a name containing "device", or a `"cuda"`/`"cpu"` literal —
+        and anything else is left alone rather than guessed at.
+      - the destination can itself vary per iteration: torch's `clip_grad` loops *over
+        devices* and calls `clip_coef.to(device)`, which cannot be hoisted.
+      - comprehension targets are not `LoopFrame` bindings, so `[t.cuda(r) for t in ts]`
+        looked loop-invariant.
+      The surviving 8 are all `torch.<factory>(...).to(device)` in test infrastructure —
+      true double allocations, 0.0035 findings/file, in line with the 0.0033 baseline. Kept
+      rather than tuned away. Random factories get a `device=` hint only, never "hoist it",
+      since a fresh draw each iteration is the point.
+- [ ] TG007-TG009, listed in [IDEAS.md](IDEAS.md). TG007 (CPU-GPU
       thrashing) last and with care: `.item()` is the *fix* for TG001 but a sync
       point in a hot loop, so the rule has to tell "once per step" from "once per
       element" or it will contradict a rule we already ship.
@@ -303,12 +317,8 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [ ] **Version the private repo.** RFC 0002 sits unversioned in `~/Dev/torch-preflight-cloud/`.
 - [x] Replaced the hardcoded test-count badge with live PyPI version, Python-version and
       licence badges, which update themselves.
-- [ ] **Delete the merged branches from the remote.** Eight are fully merged into `main`
-      and still there: `calibration/cnn-and-lm-head`, `docs/colab-download-fix`,
-      `fix/guard-activation-measurement`, `feat/tg006-bce-logits`,
-      `chore/zero-stage-and-snapshot`, `chore/todo-reconcile`, `feat/gqa-activations`
-      and `feat/encoder-decoder-shapes`. An earlier entry claimed this was already done
-      "locally and on the remote", which was only ever true locally.
+- [x] **Merged branches deleted**, locally and on the remote. All 14 were verified merged
+      into `main` first; only `main` remains on either side.
 - [x] **Snapshot refresh process defined**: `tests/calibration/verify_snapshot.py`
       compares the bundled snapshot against the live hub configs. Deliberately a verifier
       rather than a regenerator, so a renamed upstream field cannot silently rewrite the
