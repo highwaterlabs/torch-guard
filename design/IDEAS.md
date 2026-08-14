@@ -18,7 +18,6 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   rule here that genuinely needs alias analysis — probably its own RFC.
 - **TG011** `model.eval()` without a matching `model.train()` on the next epoch — a silent
   accuracy killer with batchnorm/dropout.
-- **TG012** DDP without `DistributedSampler`, so every rank trains on identical data.
 - **TG013** `.to(device)` inside the inner loop instead of hoisted.
 
 ## Analysis engine
