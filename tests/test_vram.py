@@ -712,3 +712,96 @@ def test_encoder_decoder_parameter_formula_counts_cross_attention():
         TransformerShape(decoder_layers=6, **common)
     )
     assert enc_dec > 2 * (encoder_only - common["vocab"] * common["hidden"])
+
+# ------------------------------------------------------------- DeepSpeed offload
+
+
+def test_offload_optimizer_is_read_from_a_json_config(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, opt, _, _ = deepspeed.initialize(model=model, config="ds.json")
+        """,
+        files={"ds.json": '{"zero_optimization": {"stage": 3, '
+                          '"offload_optimizer": {"device": "cpu"}}}'},
+    )
+    assert extracted.config.sharding is Sharding.ZERO3
+    assert extracted.config.offload_optimizer is True
+    assert extracted.config.offload_params is False
+
+
+def test_offload_param_is_read_separately(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, opt, _, _ = deepspeed.initialize(model=model, config="ds.json")
+        """,
+        files={"ds.json": '{"zero_optimization": {"stage": 3, '
+                          '"offload_param": {"device": "cpu"}}}'},
+    )
+    assert extracted.config.offload_params is True
+    assert extracted.config.offload_optimizer is False
+
+
+def test_offload_read_from_a_dict_literal(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        ds = {"zero_optimization": {"stage": 2, "offload_optimizer": {"device": "cpu"}}}
+        engine, _, _, _ = deepspeed.initialize(model=model, config=ds)
+        """,
+    )
+    assert extracted.config.sharding is Sharding.ZERO2
+    assert extracted.config.offload_optimizer is True
+
+
+def test_no_offload_keys_means_no_offload(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import deepspeed
+        engine, _, _, _ = deepspeed.initialize(model=model, config="ds.json")
+        """,
+        files={"ds.json": '{"zero_optimization": {"stage": 3}}'},
+    )
+    assert extracted.config.offload_optimizer is False
+    assert extracted.config.offload_params is False
+
+
+def test_offload_optimizer_removes_optimizer_state_from_the_device():
+    """ZeRO-Offload runs the optimizer step on the CPU, so neither term is resident.
+
+    For AdamW that is 8 bytes per parameter plus the 4-byte fp32 master copy — usually the
+    largest single term for a large model, and the reason people enable offload at all.
+    """
+    profile = archdb.resolve("llama-2-7b")
+    base = dict(batch_size=1, seq_len=2048, precision=PrecisionMode.FP16_MASTER,
+                optimizer=OptimizerKind.ADAMW, sharding=Sharding.ZERO3, world_size=8,
+                flash_attention=True)
+    without = estimate(profile, RunConfig(**base))
+    with_offload = estimate(profile, RunConfig(offload_optimizer=True, **base))
+
+    assert without.breakdown.optimizer_state > 0
+    assert without.breakdown.master_weights > 0
+    assert with_offload.breakdown.optimizer_state == 0
+    assert with_offload.breakdown.master_weights == 0
+    assert with_offload.total < without.total
+
+
+def test_offload_params_is_noted_rather_than_guessed():
+    """We have not measured the resident working set, so the weights term stands.
+
+    Over-estimating is the safe direction for a tool predicting OOM; the report says the
+    real peak is lower rather than inventing a fraction.
+    """
+    profile = archdb.resolve("llama-2-7b")
+    report = estimate(
+        profile,
+        RunConfig(batch_size=1, seq_len=2048, sharding=Sharding.ZERO3, world_size=8,
+                  offload_params=True, flash_attention=True),
+    )
+    assert report.breakdown.weights > 0, "weights are deliberately not reduced"
+    assert any("offload_param" in note for note in report.notes)
