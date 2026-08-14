@@ -130,9 +130,24 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
         `dec_linear = 0.16`. Both quadratic terms are pinned to the separately measured
         attention coefficient; T5, where the split *is* identifiable, fits cross-attention
         free at 6.03 against the pinned 6.0.
-- [ ] Grouped-query attention shrinks the KV projections; the activation formula ignores
-      that and will slightly over-estimate GQA models.
-- [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
+- [x] **Grouped-query attention: the premise was wrong, no change needed.** I had filed
+      this as "the activation formula ignores kv_heads and will over-estimate GQA models".
+      Measured, it does not. `transformers.repeat_kv` expands K/V to the full head count
+      and reshapes; reshaping a non-contiguous expand copies, so autograd retains full-size
+      K/V exactly as MHA would — retained bytes are bit-identical across kv_heads 16/8/4/2.
+      GQA saves parameters (already applied) and KV cache (not modelled, inference-only),
+      not training activations. `enable_gqa=True` does avoid it (0.65x at an 8x ratio), but
+      in transformers 5.x that path exists only in the exporters and one model. Charging
+      the cheap rate would under-estimate every mainstream GQA model. Both directions are
+      now pinned by tests so this cannot be "optimised" back.
+
+      Note for anyone re-measuring: this must be done on the **CPU**, not the meta device.
+      `enable_gqa` falls back to the math backend on meta and materialises the expanded
+      K/V, so every variant measures identical and the effect is invisible. Spike 0001's
+      "fused attention is not a blind spot" holds for plain SDPA but not for this flag.
+- [ ] **KV cache is not modelled at all.** Irrelevant for training, but it dominates
+      inference memory and is the place GQA genuinely pays off (8x on Llama-3-70B).
+      `--inference-only` currently just scales the activation term.- [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
       a JSON config we cannot read", which was untrue: it is either a dict literal in the
       same file or a path to a JSON file beside it, and reading JSON is not executing code.
       Handles `deepspeed.initialize(config=...)` by path, by variable and inline, plus

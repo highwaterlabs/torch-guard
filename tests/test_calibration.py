@@ -471,3 +471,121 @@ def test_models_without_an_lm_head_are_not_charged_for_one():
 
     encoder = TransformerShape(layers=2, hidden=256, heads=4, vocab=30522)
     assert lm_head_bytes(encoder, RunConfig(batch_size=2), 128) == 0
+
+
+# ------------------------------------- grouped-query attention (measured, no GPU needed)
+#
+# These run on the CPU rather than the meta device on purpose. Meta cannot answer this
+# question: `scaled_dot_product_attention(..., enable_gqa=True)` falls back to the math
+# backend there and materialises the expanded K/V, so every variant measures identical and
+# the real difference is invisible. Spike 0001 concluded fused attention is not a meta
+# blind spot, and for plain SDPA that holds — but `enable_gqa` is one.
+
+
+def _gqa_attention(h, heads, kv_heads, mode):
+    """One attention block, parameterised by how K/V reach the query heads."""
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    head_dim = h // heads
+
+    class Attention(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.q = nn.Linear(h, h, bias=False)
+            self.k = nn.Linear(h, kv_heads * head_dim, bias=False)
+            self.v = nn.Linear(h, kv_heads * head_dim, bias=False)
+            self.o = nn.Linear(h, h, bias=False)
+
+        def forward(self, x):
+            b, s, _ = x.shape
+            q = self.q(x).view(b, s, heads, head_dim).transpose(1, 2)
+            k = self.k(x).view(b, s, kv_heads, head_dim).transpose(1, 2)
+            v = self.v(x).view(b, s, kv_heads, head_dim).transpose(1, 2)
+            repeats = heads // kv_heads
+            if mode == "hf_repeat_kv":
+                # Exactly transformers' `repeat_kv`: expand then reshape. The reshape of a
+                # non-contiguous expand forces a copy, so the full-size K/V is a real
+                # tensor and autograd retains it.
+                k = k[:, :, None].expand(b, kv_heads, repeats, s, head_dim)
+                k = k.reshape(b, heads, s, head_dim)
+                v = v[:, :, None].expand(b, kv_heads, repeats, s, head_dim)
+                v = v.reshape(b, heads, s, head_dim)
+                out = F.scaled_dot_product_attention(q, k, v)
+            elif mode == "sdpa_native_gqa":
+                out = F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+            else:
+                raise AssertionError(mode)
+            return self.o(out.transpose(1, 2).reshape(b, s, h))
+
+    return Attention()
+
+
+def _retained_bytes(model, x):
+    from torch.autograd.graph import saved_tensors_hooks
+
+    parameter_storages = {p.untyped_storage()._cdata for p in model.parameters()}
+    storages = {}
+
+    def pack(tensor):
+        storage = tensor.untyped_storage()
+        if storage._cdata not in parameter_storages:
+            storages[storage._cdata] = storage.nbytes()
+        return tensor
+
+    with saved_tensors_hooks(pack, lambda t: t):
+        model(x).sum()
+    return sum(storages.values())
+
+
+def _gqa_measurement(mode, kv_heads, h=512, heads=16, batch=2, seq=128):
+    model = _gqa_attention(h, heads, kv_heads, mode)
+    return _retained_bytes(model, torch.randn(batch, seq, h, requires_grad=True))
+
+
+def test_gqa_does_not_reduce_activations_under_the_transformers_implementation():
+    """The reason `transformer_activation_bytes` ignores `kv_heads`, pinned as a fact.
+
+    `transformers.repeat_kv` expands K/V to the full head count and reshapes, which copies.
+    Autograd therefore retains full-size K/V exactly as multi-head attention would, and
+    grouped-query attention saves *parameters and KV cache*, not training activations.
+
+    Charging GQA models a reduced activation rate would under-estimate them, and
+    under-estimating is the direction that lets a run OOM. If this assertion ever fails,
+    transformers has changed how it broadcasts K/V and the cost model can follow.
+    """
+    full = _gqa_measurement("hf_repeat_kv", 16)
+    for kv_heads in (8, 4, 2):
+        assert _gqa_measurement("hf_repeat_kv", kv_heads) == full, (
+            f"kv_heads={kv_heads} retained a different amount; repeat_kv no longer "
+            f"materialises and the activation formula should account for kv_heads"
+        )
+
+
+def test_native_sdpa_gqa_does_reduce_activations():
+    """The counter-case, so the test above is known to be measuring something real.
+
+    `enable_gqa=True` broadcasts inside the kernel with nothing materialised, so retained
+    bytes fall as the group ratio rises. Almost nothing uses this path yet -- in
+    transformers 5.x it appears only in the exporters and one model -- which is why the
+    cost model models the expensive, common case.
+    """
+    full = _gqa_measurement("sdpa_native_gqa", 16)
+    smaller = [_gqa_measurement("sdpa_native_gqa", kv) for kv in (8, 4, 2)]
+    assert smaller == sorted(smaller, reverse=True), "should shrink as kv_heads shrinks"
+    assert smaller[-1] < full * 0.8, "an 8x group ratio should visibly reduce activations"
+
+
+def test_parameter_counts_do_account_for_gqa():
+    """Parameters are where the GQA saving is real, and the formula already applies it."""
+    from torch_preflight.vram.types import TransformerShape
+
+    def shape(kv_heads):
+        return TransformerShape(
+            layers=8, hidden=1024, heads=16, kv_heads=kv_heads,
+            intermediate=4096, vocab=32000,
+        )
+
+    assert params_from_transformer_shape(shape(2)) < params_from_transformer_shape(
+        shape(16)
+    )
