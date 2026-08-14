@@ -102,7 +102,7 @@ LM_HEAD_RETAINED_BYTES = 4
 #: workspace are live simultaneously; this is the gap between what is retained and what the
 #: allocator peaks at.
 #:
-#: ``measure_cuda.py --lm-head-sweep`` isolates the term on a deliberately tiny body
+#: The sweep in ``measure_cuda.py --models`` isolates the term on a deliberately tiny body
 #: (4 layers, n_embd 256) so the vocabulary projection dominates, across four vocabularies
 #: (8k / 32k / 50257 / 128k) at two batch sizes — eight peaks spanning 16x in logit count.
 #: Least squares over all eight gives 15.72 bytes per logit element of *peak*; dividing out

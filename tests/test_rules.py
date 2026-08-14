@@ -430,8 +430,8 @@ def test_bad_example_triggers_every_rule():
     path = Path(__file__).parent.parent / "examples" / "bad_train.py"
     diagnostics, _ = check_source(str(path), path.read_text())
     assert {d.code for d in diagnostics} == {
-        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG011", "TG012",
-        "TG013", "TG014",
+        "TG001", "TG002", "TG003", "TG004", "TG005", "TG006", "TG007", "TG008",
+        "TG011", "TG012", "TG013", "TG014",
     }
 
 
@@ -486,6 +486,7 @@ def test_tg003_quiet_without_an_optimizer_step():
         import torch
 
         def bench(model):
+            torch.manual_seed(0)
             for _ in range(10):
                 x = torch.rand([1000, 1000], requires_grad=True)
                 loss = (x * 2.0).sum()
@@ -1292,5 +1293,257 @@ def test_tg013_silent_outside_any_loop():
         def setup(model, class_weights, device):
             model.to(device)
             return class_weights.to(device)
+        """
+    )
+
+
+# --------------------------------------------------------------------- TG007
+
+
+def test_tg007_flags_a_sync_in_a_nested_loop():
+    assert "TG007" in codes(
+        """
+        def train(model, loader, optimizer, criterion):
+            correct = 0
+            for x, y in loader:
+                preds = model(x)
+                loss = criterion(preds, y)
+                loss.backward()
+                optimizer.step()
+                for i in range(len(preds)):
+                    correct += preds[i].item()
+        """
+    )
+
+
+def test_tg007_does_not_contradict_tg001():
+    """`loss.item()` once per step is exactly what TG001 tells you to write.
+
+    If this ever fires, the two rules are giving opposite advice about the same line and
+    one of them has to change.
+    """
+    assert "TG007" not in codes(
+        """
+        def train(model, loader, optimizer, criterion):
+            total = 0.0
+            for x, y in loader:
+                preds = model(x)
+                loss = criterion(preds, y)
+                loss.backward()
+                optimizer.step()
+                total += loss.item()
+                acc = (preds.argmax(1) == y).sum().item()
+            return total, acc
+        """
+    )
+
+
+def test_tg007_flags_explicit_synchronize_in_the_training_loop():
+    assert "TG007" in codes(
+        """
+        import torch
+        def train(model, loader, optimizer, criterion):
+            for x, y in loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+                optimizer.step()
+                torch.cuda.synchronize()
+        """
+    )
+
+
+def test_tg007_flags_a_sync_inside_a_comprehension():
+    """`[p.item() for p in preds]` drains the queue once per element."""
+    assert "TG007" in codes(
+        """
+        def train(model, loader, optimizer, criterion):
+            for x, y in loader:
+                preds = model(x)
+                loss = criterion(preds, y)
+                loss.backward()
+                values = [p.item() for p in preds]
+            return values
+        """
+    )
+
+
+def test_tg007_silent_without_a_backward_pass():
+    """A nested loop with syncs is only a training-loop problem."""
+    assert "TG007" not in codes(
+        """
+        def collect(loader):
+            out = []
+            for batch in loader:
+                for i in range(len(batch)):
+                    out.append(batch[i].item())
+            return out
+        """
+    )
+
+
+def test_tg007_silent_for_a_sync_outside_the_loop():
+    assert "TG007" not in codes(
+        """
+        def train(model, loader, optimizer, criterion):
+            for x, y in loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+                optimizer.step()
+            return loss.item()
+        """
+    )
+
+
+def test_tg007_silent_when_the_receiver_is_not_a_tensor():
+    """`.tolist()` on a plain list and `.numpy()` on an ndarray involve no device."""
+    assert "TG007" not in codes(
+        """
+        def train(model, loader, optimizer, criterion, history):
+            for x, y in loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+                for name in history:
+                    rows = name.tolist()
+            return rows
+        """
+    )
+
+
+# --------------------------------------------------------------------- TG008
+
+
+def test_tg008_flags_a_training_run_with_no_seed():
+    assert "TG008" in codes(
+        """
+        import torch
+        def train(model, loader, optimizer, criterion):
+            noise = torch.randn(4)
+            for x, y in loader:
+                loss = criterion(model(x + noise), y)
+                loss.backward()
+                optimizer.step()
+        """
+    )
+
+
+def test_tg008_flags_partial_seeding():
+    """The common shape: torch seeded, the augmentation pipeline draws from NumPy."""
+    diagnostics = analyze(
+        """
+        import numpy as np
+        import torch
+        def train(model, loader, optimizer, criterion):
+            torch.manual_seed(42)
+            for x, y in loader:
+                jitter = np.random.rand(4)
+                loss = criterion(model(x), y)
+                loss.backward()
+        """
+    )
+    found = [d for d in diagnostics if d.code == "TG008"]
+    assert found, "seeding torch does nothing for NumPy"
+    assert "NumPy" in found[0].message
+
+
+def test_tg008_silent_when_every_generator_is_seeded():
+    assert "TG008" not in codes(
+        """
+        import random
+        import numpy as np
+        import torch
+        def train(model, loader, optimizer, criterion):
+            torch.manual_seed(42)
+            np.random.seed(42)
+            random.seed(42)
+            for x, y in loader:
+                jitter = np.random.rand(4)
+                pick = random.choice([0, 1])
+                loss = criterion(model(x), y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg008_silent_for_seed_everything_helpers():
+    assert "TG008" not in codes(
+        """
+        import torch
+        from transformers import set_seed
+        def train(model, loader, optimizer, criterion):
+            set_seed(42)
+            for x, y in loader:
+                loss = criterion(model(x + torch.randn(4)), y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg008_silent_for_a_library_helper():
+    """A file that draws randomly but does not train leaves seeding to its caller."""
+    assert "TG008" not in codes(
+        """
+        import torch
+        def augment(x):
+            return x + torch.randn_like(x)
+        """
+    )
+
+
+def test_tg008_silent_for_a_random_helper_beside_training_code():
+    """Regression: `_trains` is a file-level fact, so a random helper in a file that
+    trains *elsewhere* was flagged. Found in torch's own common_nn.py."""
+    assert "TG008" not in codes(
+        """
+        import torch
+        def make_input(*size):
+            return torch.randperm(16).view(*size).double()
+
+        def train(model, loader, optimizer, criterion):
+            torch.manual_seed(0)
+            for x, y in loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg008_silent_for_an_explicit_generator():
+    """Regression: `torch.rand(..., generator=g)` is deliberately controlled randomness.
+
+    torch's dist_optimizer_test builds a dedicated `Generator` precisely to avoid
+    non-determinism, and counting that as unseeded was wrong.
+    """
+    assert "TG008" not in codes(
+        """
+        import torch
+        def train(model, loader, optimizer, criterion):
+            g = torch.Generator()
+            g.manual_seed(0)
+            w = torch.rand((3, 3), generator=g)
+            for x, y in loader:
+                loss = criterion(model(x @ w), y)
+                loss.backward()
+        """
+    )
+
+
+def test_tg007_silent_for_one_sync_per_validation_batch():
+    """A loop over a dataloader yields batches, and one sync per batch is normal logging.
+
+    Regression: found in this project's own `examples/bad_train.py`. The validation loop is
+    nested inside the epoch loop, which contains the backward pass, so nesting alone flagged
+    `print(val_loss.item())` — which is not the per-element thrashing this rule is about.
+    """
+    assert "TG007" not in codes(
+        """
+        def fit(model, loader, val_loader, optimizer, criterion):
+            for epoch in range(10):
+                for x, y in loader:
+                    loss = criterion(model(x), y)
+                    loss.backward()
+                    optimizer.step()
+                for x, y in val_loader:
+                    val_loss = criterion(model(x), y)
+                    print(val_loss.item())
         """
     )

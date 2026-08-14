@@ -13,6 +13,8 @@ from . import tg003_missing_zero_grad  # noqa: F401
 from . import tg004_dataloader  # noqa: F401
 from . import tg005_softmax_ce  # noqa: F401
 from . import tg006_bce_logits  # noqa: F401
+from . import tg007_device_sync  # noqa: F401
+from . import tg008_unseeded_run  # noqa: F401
 from . import tg010_projected_oom  # noqa: F401
 from . import tg011_stuck_eval_mode  # noqa: F401
 from . import tg012_distributed_sampler  # noqa: F401
