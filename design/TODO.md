@@ -388,3 +388,11 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
          because the fixer replaces nodes by identity in the tree the rules ran against.
          Falls back to sequential if the environment refuses to fork.
       Parallel and sequential results are asserted identical in `tests/test_engine.py`.
+
+      **That 51 s was measured at six rules and is no longer current.** At thirteen the same
+      tree takes ~4m18s, and the cost scales with rule count: on a fixed 158 files, one rule
+      is 5.4 s and ten are 26.4 s. The single traversal still does what it promised — the new
+      rules add ~0.1 s between them — but every rule recomputes `dotted_name` and
+      `final_attr` on the same nodes. Memoising those on the dispatcher is filed in
+      [IDEAS.md](IDEAS.md). A normal project is unaffected: this repo's own `src/` lints in
+      1.3 s.

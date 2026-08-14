@@ -16,8 +16,26 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   Detecting it properly also needs real alias analysis, which nothing else in the engine
   requires. If it is ever wanted, it deserves its own RFC rather than a rule file.
 
+- **TG015** `pin_memory=True` with `num_workers=0`, which allocates page-locked staging
+  buffers that nothing overlaps with. TG004 covers the inverse; this is the wasted half.
+- **TG016** `torch.compile` inside the training loop, which recompiles every call and can
+  cost more than it saves. Needs care: a guard-triggered recompile is legitimate.
+- **TG017** an optimizer constructed inside the training loop, which throws away momentum
+  and Adam state every step. Silent, and the loss curve looks like a bad learning rate.
+
 ## Analysis engine
 
+- **Memoise per-node derived facts in the dispatcher.** Per-rule cost currently scales
+  linearly: on the same 158 files, one rule takes 5.4s and ten take 26.4s, and a full scan
+  of torch went from 51s at six rules to 4m18s at thirteen. The single traversal did what it
+  promised, but every rule independently recomputes `dotted_name(node.func)` and
+  `final_attr(node.func)` on the same nodes. Caching those on the dispatcher, keyed by node
+  identity, should flatten most of the per-rule cost without touching any rule.
+- **A scoped-fact helper.** Four separate rules have now shipped a bug where a file-level
+  fact leaked across functions — `prov.models`, `prov.criteria`, `uses_distributed` and
+  TG008's "does this file train". Each was fixed the same way: walk out from the current
+  scope, stop at the first binding. That deserves to be one helper on `Rule` rather than a
+  pattern everyone re-implements and half of us get wrong the first time.
 - Cross-file resolution: today the provenance analysis stops at file boundaries. A model
   defined in `models.py` and trained in `train.py` is the common layout, and we currently
   lean on naming conventions to bridge it.
@@ -27,6 +45,23 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   structural ones.
 - Type inference from annotations when present — `def f(x: torch.Tensor)` is free signal we
   currently ignore.
+
+## VRAM model
+
+- **Prefill versus decode peak.** Generation has two phases with different shapes: prefill
+  runs the whole prompt at once and does materialise an attention matrix, decode runs one
+  token against the cache. We model decode, which is the steady state and the one KV-cache
+  sizing is about. The true peak is `max(prefill, decode + cache)`, and with flash attention
+  the two converge — without it, prefill can dominate.
+- **Paged attention.** vLLM and TensorRT-LLM manage the KV cache in fixed blocks with their
+  own allocator, so our contiguous figure is the right order of magnitude but not their
+  occupancy. Modelling block granularity and fragmentation would make the estimate usable
+  for capacity planning on those runtimes.
+- **A "what fits" solver for serving.** The remediation solver answers "how do I make this
+  fit". The serving question is the inverse: given a GPU and a model, what is the largest
+  batch and context that fit? Same cost model, run backwards.
+- **Tensor parallelism for inference.** Sharding is modelled for training (ZeRO/FSDP), but a
+  served model split across GPUs divides weights and cache differently.
 
 ## Distribution
 
