@@ -161,10 +161,14 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       is now visible in the configs we parse, but is not modelled — we still charge it to
       the GPU, which over-estimates offloaded runs.
 - [x] **GitHub Actions pins bumped off Node 20**: checkout v4->v7, setup-python v5->v7,
-      upload-artifact v4->v7, download-artifact v4->v8. PR CI exercises `ci.yml`, but
-      `release.yml` only runs on a tag — rehearse it via `workflow_dispatch` (which builds
-      and checks without publishing) before the next release, since the artifact
-      upload/download pair is the part CI does not cover.
+      upload-artifact v4->v7, download-artifact v4->v8. Rehearsed on `main` via
+      `workflow_dispatch` and green.
+      The first rehearsal only half-covered the risk: `publish` is skipped on a manual run,
+      and that is the job holding `download-artifact`, so the upload was exercised and the
+      download never was — the pair would have failed for the first time during a real
+      release, after the version number was spent. `release.yml` now has a `rehearse` job
+      that runs on `workflow_dispatch` only, downloads the artifact and asserts the publish
+      step would find exactly one wheel and one sdist.
 
 ## Phase 2 — exact tier
 

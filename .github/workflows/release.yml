@@ -76,10 +76,38 @@ jobs:
           name: dist
           path: dist/
 
+  # A manual run skips `publish`, which is where the artifact is downloaded -- so without
+  # this job a rehearsal exercises the upload and never the download, and an incompatible
+  # upload/download pair would only surface during a real release, after the version number
+  # is already spent. This runs on workflow_dispatch only and touches nothing outside the
+  # runner.
+  rehearse:
+    name: Rehearse the artifact round-trip
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: The publish step must find exactly the two artifacts it expects
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          names = sorted(p.name for p in pathlib.Path("dist").iterdir())
+          wheels = [n for n in names if n.endswith(".whl")]
+          tarballs = [n for n in names if n.endswith(".tar.gz")]
+          if len(wheels) != 1 or len(tarballs) != 1:
+              sys.exit(f"expected one wheel and one sdist, found: {names}")
+          print("artifact round-trip intact:", names)
+          PY
+
   publish:
     name: Publish to PyPI
-    # Only a tag publishes. A manual run stops after build, so the pipeline can be
-    # rehearsed without burning a version number.
+    # Only a tag publishes. A manual run stops after build and `rehearse`, so the pipeline
+    # can be exercised end to end without burning a version number.
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
