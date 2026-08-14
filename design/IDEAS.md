@@ -9,11 +9,6 @@ do it, or to an [RFC](rfcs/) when it needs a design first.
 
 Each is one file plus a `@register` decorator — the registry was built for this.
 
-- **TG007** CPU↔GPU thrashing: `.cpu()`, `.numpy()`, `.item()` inside the training loop.
-  Nuance — `.item()` is the *fix* for TG001 but a sync point in a hot loop. The rule has to
-  distinguish "once per step" from "once per element", or it will contradict TG001.
-- **TG008** non-reproducible runs: `torch.rand` without seeding all of `torch`, `numpy`,
-  `random`. Also `DataLoader(shuffle=True)` with no `generator=`.
 - **TG009** in-place ops on tensors needed for backward (`x += 1` vs `x = x + 1`). The one
   rule here that genuinely needs alias analysis — probably its own RFC.
 

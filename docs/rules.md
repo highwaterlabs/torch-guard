@@ -11,6 +11,8 @@
 | **TG012** | error | `CONVERGENCE_BUG` | `DataLoader` under DDP with no `DistributedSampler` — every rank trains on identical batches |
 | **TG014** | error | `CONVERGENCE_BUG` | Gradient accumulation without dividing the loss — summed gradients scaled as if averaged, equivalent to an N× learning rate |
 | **TG011** | error | `CONVERGENCE_BUG` | `model.eval()` in an epoch loop with no matching `train()` — only the first epoch trains properly |
+| **TG007** | warning | `PERFORMANCE_WARN` | A GPU sync (`.item()`, `.cpu()`, `.numpy()`) inside a loop nested in the training step, or `cuda.synchronize()` every step |
+| **TG008** | warning | `CONVERGENCE_BUG` | A training run whose randomness is unseeded, or seeded for only some of torch / NumPy / `random` |
 | **TG013** | warning | `PERFORMANCE_WARN` | A host-to-device transfer repeated every iteration — loop-invariant data, a host factory, or the model itself |
 | **TG010** | error | `CRITICAL_OOM` | Projected peak VRAM exceeds the configured `target_gpu` — see [VRAM estimation](vram-estimation.md) |
 

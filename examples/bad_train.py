@@ -48,6 +48,10 @@ def train(model, dataset, val_dataset, device):
             losses.append(loss)      # TG001: keeps the whole graph alive
             total_loss += loss       # TG001: chains every step's graph together
 
+        # TG007: a sync per element instead of one reduction on the device
+        for i in range(len(losses)):
+            total_loss += losses[i].item()
+
         # TG002: validation forward pass with autograd still enabled
         model.eval()
         for images, targets in val_loader:
@@ -68,6 +72,19 @@ def train_binary(model, loader, device):
         logits = model(images.to(device))
         probs = torch.sigmoid(logits)
         loss = criterion(probs, targets)  # TG006: sigmoid applied twice
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+
+def train_unseeded(model, loader, device):
+    """Nothing seeds the generators this run draws from."""
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    noise = torch.randn(784)  # TG008: no seed, so the run cannot be reproduced
+
+    for images, targets in loader:
+        loss = criterion(model(images.to(device) + noise), targets)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()

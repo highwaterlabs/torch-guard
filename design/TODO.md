@@ -83,7 +83,7 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       shapes and three vocabularies, precision-independent. Split out from the fitted
       backward-transient part so the evidence for each is visible.
 - [x] **LM-head backward transient measured**, replacing the two-point fit. The sweep it
-      needed now exists (`measure_cuda.py --lm-head-sweep`): four vocabularies from 8k to
+      needed now exists (the sweep in `measure_cuda.py --models`): four vocabularies from 8k to
       128k at two batch sizes on a tiny body, eight peaks spanning 16x in logit count.
       Least squares gives 15.72 bytes per logit of peak, 14.22 after dividing out
       fragmentation, minus the measured 4 retained — so the constant went 6 -> 10 and mean
@@ -284,10 +284,29 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       true double allocations, 0.0035 findings/file, in line with the 0.0033 baseline. Kept
       rather than tuned away. Random factories get a `device=` hint only, never "hoist it",
       since a fresh draw each iteration is the point.
-- [ ] TG007-TG009, listed in [IDEAS.md](IDEAS.md). TG007 (CPU-GPU
-      thrashing) last and with care: `.item()` is the *fix* for TG001 but a sync
-      point in a hot loop, so the rule has to tell "once per step" from "once per
-      element" or it will contradict a rule we already ship.
+- [x] **TG007 — a GPU sync inside a loop nested in the training step.** The rule the IDEAS
+      entry warned about, and the warning was the whole design problem: `.item()` once per
+      step is exactly what TG001 tells you to write, so flagging it would have the tool
+      contradict itself. Resolved by keying off *nesting* rather than the call — the training
+      step is the loop containing `.backward()`, a sync directly in it is once per step and
+      fine, a sync in a loop inside it drains the pipeline per element. Comprehensions count.
+      `torch.cuda.synchronize()` in the training loop is flagged separately as an
+      unconditional drain. There is a test asserting the TG001 case stays silent; if it ever
+      fires, the two rules are giving opposite advice and one has to change.
+      6 findings on torch, all deliberate `cuda.synchronize()` in one distributed test file.
+- [x] **TG008 — a training run whose randomness is unseeded.** Three independent generators
+      (torch, NumPy, `random`) and seeding one does nothing for the others, so partial
+      seeding is the usual shape rather than none. Only fires on code that trains, names
+      which generator is unseeded, and recognises `seed_everything` / `set_seed`. Two false
+      positives found against torch and fixed: `torch.rand(..., generator=g)` is
+      deliberately controlled randomness, and a random *helper* in a file that trains
+      elsewhere is a library function whose caller owns seeding — the file-wide leakage
+      pattern, now for the fourth time. 4 findings on torch, all true-but-intentional in
+      test infrastructure.
+- [ ] TG009 only, in [IDEAS.md](IDEAS.md), and I would **skip it**: in-place ops on tensors
+      needed for backward already raise a precise runtime error from PyTorch itself, so a
+      pre-flight check adds little over what the interpreter tells you. It also needs real
+      alias analysis. Worth an RFC if it is ever wanted, not worth a rule now.
 
 ## Cross-cutting
 
