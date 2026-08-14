@@ -199,6 +199,34 @@ def transformer_activation_bytes(
     return int((linear + attention) * shape.layers * dtype_scale)
 
 
+def decode_step_activation_bytes(shape: TransformerShape, config: RunConfig) -> int:
+    """Activations for one autoregressive decode step.
+
+    Generation does not re-run the whole sequence. Each step feeds a *single* token forward
+    and attends against the cache, so the activation cost is a one-token slice and the
+    O(seq^2) score matrix never materialises -- the history lives in the KV cache instead,
+    which is accounted for separately.
+
+    Modelling this with the training formula at full context is what made a GPT-2 generation
+    estimate read 105 GiB: it charged a 4096x4096 attention matrix per layer that decoding
+    never builds.
+    """
+    b = config.batch_size
+    h = shape.hidden
+    a = shape.heads
+    context = config.max_context or config.seq_len or shape.max_position or 1
+    dtype_scale = config.precision.activation_bytes / ACT_REFERENCE_DTYPE_BYTES
+
+    linear_coeff = (
+        ACT_LINEAR_COEFF_DROPOUT if shape.uses_dropout else ACT_LINEAR_COEFF_NO_DROPOUT
+    )
+    # One token through the stack, plus the attention scores of that token against the whole
+    # cached context: [batch, heads, 1, context] rather than [batch, heads, seq, seq].
+    linear = linear_coeff * b * h
+    scores = 0.0 if config.flash_attention else 2.0 * a * context * b
+    return int((linear + scores) * INFERENCE_LIVE_LAYERS * dtype_scale)
+
+
 def encoder_decoder_activation_bytes(
     shape: TransformerShape, config: RunConfig, seq_len: int
 ) -> Optional[int]:
@@ -252,6 +280,41 @@ def encoder_decoder_activation_bytes(
     return int(total * dtype_scale)
 
 
+def kv_cache_bytes(shape: TransformerShape, config: RunConfig) -> int:
+    """Bytes held by the key/value cache during autoregressive decoding.
+
+    Each layer keeps one K and one V entry per token generated so far, so the cache grows
+    linearly with context and never shrinks within a sequence::
+
+        2 (K and V) * layers * kv_heads * head_dim * context * batch * dtype
+
+    This is where grouped-query attention actually pays off. GQA does **not** reduce training
+    activations -- ``transformer_activation_bytes`` explains why, and it is measured -- but
+    the cache stores one K/V pair per *KV head*, so Llama-3-70B's 8 KV heads against 64 query
+    heads make the cache 8x smaller. Modelling the cache without the ratio would overstate
+    every modern serving deployment by that factor.
+
+    Arithmetic, not measurement: the cache is a plain allocation of a known shape, unlike the
+    activation term. What is *not* modelled is the allocator's behaviour around it --
+    paged-attention runtimes (vLLM, TensorRT-LLM) manage the cache in blocks and will differ.
+    """
+    if not config.generation:
+        return 0
+
+    context = config.max_context or config.seq_len or shape.max_position
+    if not context:
+        return 0
+
+    head_dim = shape.hidden // shape.heads if shape.heads else 0
+    kv_heads = shape.kv_heads or shape.heads
+    if not head_dim or not kv_heads:
+        return 0
+
+    per_token = 2 * shape.layers * kv_heads * head_dim
+    # The cache holds whatever dtype the weights are in; it is not upcast.
+    return int(per_token * context * config.batch_size * config.precision.activation_bytes)
+
+
 def cnn_activation_bytes(profile: ModelProfile, config: RunConfig) -> Optional[int]:
     """Activation memory for a vision model, scaled from a reference resolution."""
     if profile.activation_bytes_per_sample is None:
@@ -288,6 +351,9 @@ def lm_head_bytes(shape: TransformerShape, config: RunConfig, seq_len: int) -> i
 def _activation_bytes(profile: ModelProfile, config: RunConfig) -> Optional[int]:
     if profile.activation_bytes_per_sample is not None:
         return cnn_activation_bytes(profile, config)
+
+    if config.generation and profile.shape is not None:
+        return decode_step_activation_bytes(profile.shape, config)
 
     if profile.shape is not None and profile.shape.is_encoder_decoder:
         seq_len = config.seq_len or profile.shape.max_position
@@ -368,6 +434,18 @@ def estimate(
 
     # autocast holds its casted weight copies through the backward pass, in inference too.
     breakdown.autocast_cache = int(params * precision.cast_cache_bytes / param_div)
+
+    if profile.shape is not None:
+        breakdown.kv_cache = kv_cache_bytes(profile.shape, config)
+        if breakdown.kv_cache and not config.max_context:
+            # The cache is sized by prompt *plus* generated tokens. With only one of them
+            # known the estimate is low, and low is the direction that lets a server OOM
+            # mid-request, so say so rather than presenting it as complete.
+            notes.append(
+                "KV cache sized from the sequence length alone. It grows with prompt plus "
+                "generated tokens, so pass --max-context with the real total if the prompt "
+                "is long."
+            )
 
     if config.offload_params:
         # `offload_param` streams parameters in per layer, so only a working set is

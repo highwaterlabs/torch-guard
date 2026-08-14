@@ -79,6 +79,10 @@ class _Extractor(ScopeTrackingVisitor):
         self.deepspeed_stage_guessed = False
         self.offload_optimizer = False
         self.offload_params = False
+        #: `.generate(...)` or `use_cache=True`: autoregressive decoding, which caches K/V.
+        self.generation = False
+        #: Tokens generated on top of the prompt, from `max_new_tokens`/`max_length`.
+        self.max_new_tokens = None
         self.sources: Dict[str, str] = {}
 
         self.batch_candidates: List[Tuple[int, bool, int]] = []  # (value, is_eval, line)
@@ -169,6 +173,7 @@ class _Extractor(ScopeTrackingVisitor):
         self._check_optimizer(node, lowered, dotted)
         self._check_precision(node, leaf, dotted)
         self._check_sharding(node, leaf)
+        self._check_generation(node, leaf)
         self._check_model_ref(node, leaf)
         self._check_transforms(node, leaf)
 
@@ -429,6 +434,30 @@ class _Extractor(ScopeTrackingVisitor):
         zero = data.get("zero_optimization")
         return zero if isinstance(zero, dict) else None
 
+    def _check_generation(self, node: cst.Call, leaf: str) -> None:
+        """Does this script decode autoregressively?
+
+        Only generation builds a KV cache. A plain forward pass -- validation, feature
+        extraction, a scoring pass -- runs the whole batch at once and caches nothing, so
+        `inference_only` alone is not the signal.
+        """
+        if leaf in ("generate", "sample", "greedy_search", "beam_search"):
+            self.generation = True
+            self._record("generation", node)
+        cache = keyword_arg(node, "use_cache")
+        if cache is not None and isinstance(cache.value, cst.Name) and cache.value.value == "True":
+            self.generation = True
+            self._record("generation", node)
+
+        for key in ("max_new_tokens", "max_length"):
+            arg = keyword_arg(node, key)
+            if arg is None:
+                continue
+            value = self._int_of(arg.value)
+            if value:
+                self.max_new_tokens = max(self.max_new_tokens or 0, value)
+                self._record("max_context", node)
+
     def _check_model_ref(self, node: cst.Call, leaf: str) -> None:
         if leaf != "from_pretrained" or self.model_ref is not None:
             return
@@ -515,6 +544,12 @@ def extract(ctx: FileContext) -> ExtractedConfig:
         sharding=extractor.sharding,
         offload_optimizer=extractor.offload_optimizer,
         offload_params=extractor.offload_params,
+        generation=extractor.generation,
+        max_context=(
+            (extractor.seq_len or 0) + extractor.max_new_tokens
+            if extractor.max_new_tokens and extractor.seq_len
+            else extractor.max_new_tokens
+        ),
         inference_only=not extractor.saw_backward,
         sources=extractor.sources,
     )

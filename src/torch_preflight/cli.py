@@ -100,6 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="assume gradient checkpointing is on")
     est.add_argument("--flash", action="store_true", help="assume flash attention / SDPA")
     est.add_argument("--inference", action="store_true", help="inference only, no backward")
+    est.add_argument("--generate", action="store_true",
+                     help="autoregressive decoding, which holds a KV cache")
+    est.add_argument("--max-context", type=int,
+                     help="total tokens the KV cache must hold (prompt + generated)")
     est.add_argument("-f", "--format", choices=("terminal", "json"), default="terminal")
 
     gpus = subparsers.add_parser("gpus", help="list known GPUs and cloud instances")
@@ -228,7 +232,9 @@ def _run_estimate(args: argparse.Namespace) -> int:
         "sharding": Sharding(args.sharding) if args.sharding else None,
         "gradient_checkpointing": True if args.checkpointing else None,
         "flash_attention": True if args.flash else None,
-        "inference_only": True if args.inference else None,
+        "inference_only": True if (args.inference or args.generate) else None,
+        "generation": True if args.generate else None,
+        "max_context": args.max_context,
     }
 
     from .vram.providers.meta import EntryPointError, parse_model_args

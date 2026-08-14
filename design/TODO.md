@@ -139,9 +139,29 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       `enable_gqa` falls back to the math backend on meta and materialises the expanded
       K/V, so every variant measures identical and the effect is invisible. Spike 0001's
       "fused attention is not a blind spot" holds for plain SDPA but not for this flag.
-- [ ] **KV cache is not modelled at all.** Irrelevant for training, but it dominates
-      inference memory and is the place GQA genuinely pays off (8x on Llama-3-70B).
-      `--inference-only` currently just scales the activation term.
+- [x] **KV cache modelled**, and with it a correction to what `--inference` meant.
+      `2 * layers * kv_heads * head_dim * context * batch * dtype`: plain arithmetic over a
+      known allocation, not a measured constant. This is where grouped-query attention
+      actually pays off — llama-3-8b's 8 KV heads against 32 query heads make its cache a
+      quarter of the multi-head equivalent, which is the mirror image of the training-side
+      finding that GQA does *not* reduce activations.
+
+      Adding it exposed a real modelling error: `inference_only` ran the **training**
+      activation formula, so a GPT-2 generation estimate at batch 32 and 4096 context read
+      105 GiB — it charged a 4096x4096 attention matrix per layer that decoding never
+      builds. Generation now costs a single decode step, one token attending against the
+      cache. llama-2-7b at batch 32 / 4096 context now reads 12.6 GiB of weights against
+      64 GiB of cache, which is the shape everyone who has sized a serving deployment
+      recognises.
+
+      Detected from `.generate(...)` / `use_cache=True` rather than from `inference_only`,
+      because a plain forward pass caches nothing. `--generate` and `--max-context` expose
+      it on the CLI. When only half the context is known the report says so: the cache is
+      sized by prompt *plus* generated tokens, and under-counting is what lets a server OOM
+      mid-request.
+- [ ] **Paged attention is not modelled.** vLLM and TensorRT-LLM manage the cache in blocks
+      with their own allocator, so the contiguous figure above is the right order of
+      magnitude but not their actual occupancy.
 - [x] **DeepSpeed ZeRO stage is now read, not assumed.** The comment said the stage "is in
       a JSON config we cannot read", which was untrue: it is either a dict literal in the
       same file or a path to a JSON file beside it, and reading JSON is not executing code.

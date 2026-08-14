@@ -16,6 +16,11 @@
 | **TG013** | warning | `PERFORMANCE_WARN` | A host-to-device transfer repeated every iteration — loop-invariant data, a host factory, or the model itself |
 | **TG010** | error | `CRITICAL_OOM` | Projected peak VRAM exceeds the configured `target_gpu` — see [VRAM estimation](vram-estimation.md) |
 
+The numbering has gaps. TG009 is **deliberately not implemented**: in-place operations on
+tensors needed for backward already raise a precise error from PyTorch itself, naming the
+tensor and its version counter, so a pre-flight check adds nothing you would not learn a
+second later. Every rule here targets a failure that is *silent*.
+
 `torch-preflight explain TG001` prints the full write-up for any rule, including why it costs
 money and how to fix it.
 

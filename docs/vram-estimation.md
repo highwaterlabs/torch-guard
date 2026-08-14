@@ -171,6 +171,52 @@ weights term stands and the report tells you the real peak is lower.
   measured coefficients, so they report activations as unknown rather than borrowing
   another family's numbers.
 
+## Sizing a serving deployment
+
+Generation is a different memory shape from training, and `--generate` models it:
+
+```bash
+torch-preflight estimate --model llama-3-8b --gpu a100-80gb --generate \
+    --batch-size 16 --max-context 8192 --dtype pure-bf16
+```
+
+```
+Config     pure-bf16 · batch 16 · context 8192 · generation (KV cache)
+
+  weights            14.96 GiB  ███████████
+  activations           20 MiB  █
+  KV cache           16.00 GiB  ████████████
+  ...
+```
+
+Two things change relative to a training estimate.
+
+**The KV cache appears**, and it is usually the term that decides the answer. Each layer
+keeps one key and one value per token generated so far:
+
+```
+2 (K and V) × layers × kv_heads × head_dim × context × batch × dtype
+```
+
+This is where grouped-query attention pays off. GQA does *not* reduce training activations —
+that is measured and explained above — but the cache stores one K/V pair per **KV head**, so
+llama-3-8b's 8 KV heads against 32 query heads make its cache a quarter of the multi-head
+equivalent. For llama-2-7b, which has no GQA, a batch of 32 at 4096 tokens needs 64 GiB of
+cache against 12.6 GiB of weights.
+
+**Activations collapse.** Decoding feeds a single token forward and attends against the
+cache, so the O(context²) score matrix never materialises. Estimating generation with the
+training formula is a large over-estimate — it charges an attention matrix per layer that
+decoding never builds.
+
+`--generate` is inferred automatically from `.generate(...)` or `use_cache=True` in a script.
+A plain forward pass caches nothing, so `--inference` alone does not imply it.
+
+The cache is sized by prompt **plus** generated tokens. When only one of those is visible the
+report says so, because under-counting the context is what lets a server OOM mid-request.
+Paged-attention runtimes (vLLM, TensorRT-LLM) manage the cache in blocks with their own
+allocator, so treat this as the right order of magnitude rather than their exact occupancy.
+
 ## Guarding a run at runtime
 
 The estimator answers "will this fit?" before the job is submitted. `VRAMGuard` answers it

@@ -805,3 +805,111 @@ def test_offload_params_is_noted_rather_than_guessed():
     )
     assert report.breakdown.weights > 0, "weights are deliberately not reduced"
     assert any("offload_param" in note for note in report.notes)
+
+
+# ------------------------------------------------------------------- KV cache
+
+
+def _generation_config(**kwargs):
+    base = dict(batch_size=1, seq_len=1024, max_context=1024, generation=True,
+                inference_only=True, precision=PrecisionMode.PURE_BF16)
+    base.update(kwargs)
+    return RunConfig(**base)
+
+
+def test_kv_cache_is_zero_without_generation():
+    """A forward pass over a batch caches nothing; only decoding does."""
+    profile = archdb.resolve("llama-2-7b")
+    report = estimate(profile, RunConfig(batch_size=1, seq_len=1024, inference_only=True))
+    assert report.breakdown.kv_cache == 0
+
+
+def test_kv_cache_is_zero_during_training():
+    profile = archdb.resolve("llama-2-7b")
+    report = estimate(profile, RunConfig(batch_size=1, seq_len=1024))
+    assert report.breakdown.kv_cache == 0
+
+
+def test_kv_cache_matches_the_closed_form():
+    """2 (K and V) * layers * kv_heads * head_dim * context * batch * dtype."""
+    profile = archdb.resolve("llama-3-8b")
+    shape = profile.shape
+    config = _generation_config(batch_size=4, max_context=2048)
+    report = estimate(profile, config)
+
+    head_dim = shape.hidden // shape.heads
+    expected = (2 * shape.layers * shape.kv_heads * head_dim * 2048 * 4
+                * PrecisionMode.PURE_BF16.activation_bytes)
+    assert report.breakdown.kv_cache == expected
+
+
+def test_kv_cache_scales_linearly_with_context_and_batch():
+    profile = archdb.resolve("llama-2-7b")
+    one = estimate(profile, _generation_config(max_context=1024)).breakdown.kv_cache
+    twice_context = estimate(profile, _generation_config(max_context=2048)).breakdown.kv_cache
+    twice_batch = estimate(profile, _generation_config(batch_size=2)).breakdown.kv_cache
+    assert twice_context == 2 * one
+    assert twice_batch == 2 * one
+
+
+def test_grouped_query_attention_shrinks_the_kv_cache():
+    """The place GQA actually pays off, unlike training activations (see TG/GQA tests).
+
+    llama-3-8b has 8 KV heads against 32 query heads, so its cache is a quarter of what the
+    same shape would need with full multi-head attention.
+    """
+    from torch_preflight.vram.costmodel import kv_cache_bytes
+    from torch_preflight.vram.types import TransformerShape
+
+    common = dict(layers=32, hidden=4096, heads=32, intermediate=14336, vocab=128256)
+    config = _generation_config(batch_size=1, max_context=4096)
+    mha = kv_cache_bytes(TransformerShape(**common), config)
+    gqa = kv_cache_bytes(TransformerShape(kv_heads=8, **common), config)
+    assert gqa == mha // 4
+
+
+def test_generation_does_not_charge_a_full_attention_matrix():
+    """Decoding feeds one token against the cache; the seq^2 matrix never materialises.
+
+    Regression: modelling generation with the training formula charged GPT-2 a 4096x4096
+    score matrix per layer and reported 105 GiB for a batch-32 run.
+    """
+    profile = archdb.resolve("gpt2")
+    report = estimate(profile, _generation_config(batch_size=32, max_context=4096))
+    assert report.breakdown.activations < report.breakdown.kv_cache
+    assert report.breakdown.activations < 100 * 1024 ** 2, "one decode step is small"
+
+
+def test_kv_cache_warns_when_the_context_is_only_half_known():
+    """Sized from seq_len alone it is low, and low lets a server OOM mid-request."""
+    profile = archdb.resolve("llama-2-7b")
+    report = estimate(profile, _generation_config(max_context=None))
+    assert any("KV cache sized from the sequence length" in note for note in report.notes)
+
+
+def test_generation_is_detected_from_a_script(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        from transformers import AutoModelForCausalLM
+        model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+        def serve(inputs):
+            return model.generate(inputs, max_new_tokens=512, use_cache=True)
+        """,
+    )
+    assert extracted.config.generation is True
+    assert extracted.config.max_context == 512
+
+
+def test_a_plain_forward_pass_is_not_generation(tmp_path):
+    extracted = _extract_in(
+        tmp_path,
+        """
+        import torch
+        def evaluate(model, loader):
+            with torch.no_grad():
+                for x, y in loader:
+                    model(x)
+        """,
+    )
+    assert extracted.config.generation is False
