@@ -328,6 +328,17 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       pre-flight check adds little over what the interpreter tells you. It also needs real
       alias analysis. Worth an RFC if it is ever wanted, not worth a rule now.
 
+- [x] **The documented Action usage was broken.** README and `docs/ci.md` both said
+      `uses: highwaterlabs/torch-preflight@v0`, and no `v0` ref existed — only `v0.1.0`,
+      `v0.2.0`, `v0.3.0`. Every copy-paste of our own CI instructions would have failed to
+      resolve. Nobody hit it because nobody had used the Action yet, and publishing to the
+      GitHub Marketplace is exactly what would have changed that.
+      Fixed three ways: a floating `v0` tag; a `major-tag` job in `release.yml` that moves
+      it after `publish` succeeds, so it can never point at a version that failed to reach
+      PyPI; and `action-smoke.yml`, which runs the documented line verbatim and asserts both
+      the clean-tree pass and the non-zero exit on a tree with bugs. CI tested the package
+      thoroughly and had never once tested the thing users are told to write.
+
 ## Cross-cutting
 
 - [x] Name and org settled: package `torch-preflight`, org `highwaterlabs`, deliberately
