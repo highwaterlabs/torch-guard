@@ -339,6 +339,13 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       the clean-tree pass and the non-zero exit on a tree with bugs. CI tested the package
       thoroughly and had never once tested the thing users are told to write.
 
+- [x] **The Node 20 pin bump missed `action.yml`.** It updated
+      `.github/workflows/*.yml` and not the composite action at the repo root — so our own
+      CI was clean while every *user* of the Action still got the deprecation warning in
+      their logs. Found in the `action-smoke.yml` output, which is the first thing that had
+      ever run the Action as a consumer does. Worth remembering that "our workflows" and
+      "the workflow we ship" are different surfaces.
+
 ## Cross-cutting
 
 - [x] Name and org settled: package `torch-preflight`, org `highwaterlabs`, deliberately
