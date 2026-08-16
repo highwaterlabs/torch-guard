@@ -1,0 +1,64 @@
+name: Action smoke test
+
+# Exercises the Action exactly as the README documents it, from the floating major tag.
+#
+# This exists because that documented line was broken and nothing noticed: the README and
+# docs/ci.md both said `uses: highwaterlabs/torch-preflight@v0`, and no `v0` ref existed, so
+# every copy-paste of our own instructions would have failed to resolve. CI tested the
+# package thoroughly and never once tested the thing users are told to write.
+#
+# Runs after a release (when `v0` has just moved) and on demand.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Action ref to test, e.g. v0 or v0.3.0"
+        default: "v0"
+
+permissions:
+  contents: read
+
+jobs:
+  clean-tree:
+    name: Passes on a clean tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The documented usage, verbatim. If `v0` does not resolve, this step fails here
+      # rather than in a user's repository.
+      - uses: highwaterlabs/torch-preflight@v0
+        with:
+          paths: src/
+          fail-on: error
+
+  finds-real-bugs:
+    name: Fails on a tree with bugs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # A linter that cannot fail a build is not a CI gate. `examples/bad_train.py` holds
+      # one instance of every rule, so this asserts the non-zero exit path works too.
+      #
+      # Named as a file, not a directory: this repo's pyproject excludes `examples` from its
+      # own linting, since those files are deliberately broken. An explicitly named path
+      # bypasses `exclude`, the way every other linter behaves.
+      - uses: highwaterlabs/torch-preflight@v0
+        id: check
+        continue-on-error: true
+        with:
+          paths: examples/bad_train.py
+          fail-on: error
+
+      - name: The Action must have exited non-zero
+        run: |
+          code="${{ steps.check.outputs.exit-code }}"
+          if [ "$code" = "0" ]; then
+            echo "::error::examples/bad_train.py is full of deliberate bugs but the Action reported success"
+            exit 1
+          fi
+          echo "Action correctly failed the build (exit $code)"

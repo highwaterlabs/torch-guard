@@ -123,3 +123,35 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # The Action is documented as `uses: highwaterlabs/torch-preflight@v0`, which is the
+  # Actions convention: users pin a floating major tag and pick up non-breaking releases.
+  # That tag has to be moved on every release, and a floating tag maintained by hand is one
+  # that silently goes stale -- so it is moved here, and only after `publish` succeeds, so
+  # `v0` can never point at a version that failed to reach PyPI.
+  major-tag:
+    name: Move the floating major tag
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # required to force-move the tag
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Point v<major> at this release
+        run: |
+          set -euo pipefail
+          full="${GITHUB_REF_NAME}"                 # e.g. v0.3.0
+          major="${full%%.*}"                       # e.g. v0
+          if [ "$major" = "$full" ]; then
+            echo "::error::$full does not look like vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$major" "$full^{commit}"
+          git push -f origin "refs/tags/$major"
+          echo "$major now points at $full ($(git rev-parse --short "$full^{commit}"))"
