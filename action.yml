@@ -1,5 +1,5 @@
 name: torch-preflight
-description: Static analysis for PyTorch training code - VRAM leaks, convergence bugs, GPU stalls.
+description: Catch PyTorch VRAM leaks and silent convergence bugs, and check a training run fits before it starts.
 author: Himanshu Janbandhu
 
 branding:
