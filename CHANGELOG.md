@@ -3,6 +3,29 @@
 All notable changes to torch-preflight are recorded here. This project follows
 [semantic versioning](https://semver.org/).
 
+## [0.3.1] — 2026-08-17
+
+**No changes to the Python package.** This release exists so the GitHub Action can be
+published to the Marketplace from a tag whose tree is correct — `v0.3.0` predates both
+fixes below.
+
+### Fixed
+
+- **The Action pinned `actions/setup-python@v5`**, which targets the deprecated Node 20
+  runtime. The earlier pin bump updated `.github/workflows/*.yml` and missed `action.yml`
+  at the repo root — the composite action users actually execute — so our own CI was clean
+  while every consumer of the Action got a deprecation warning in their logs.
+- **`uses: highwaterlabs/torch-preflight@v0` did not resolve.** The README and `docs/ci.md`
+  both documented that line and no `v0` ref existed, so every copy-paste of our own CI
+  instructions failed. There is now a floating `v0` tag, a release-workflow job that moves
+  it after a successful publish, and a smoke test that runs the documented line verbatim
+  and asserts both the clean-tree pass and the non-zero exit on a tree with bugs.
+
+### Changed
+
+- The Action's description now names both halves of the tool rather than only the linter.
+  It is the line that appears in Marketplace search results.
+
 ## [0.3.0] — 2026-08-14
 
 Seven new rules, and a VRAM estimator that now covers serving as well as training.
