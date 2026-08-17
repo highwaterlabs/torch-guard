@@ -63,6 +63,12 @@ cost of occasional noise. Known suppressions already built in:
 - `zero_grad()` inside an `if` in the loop — deliberate gradient accumulation
 - pytest's `test_*` functions, which legitimately exercise autograd
 - containers created fresh inside the loop body, which cannot accumulate
+- **retention a later backward depends on** — a container whose elements reach a backward
+  pass is holding those graphs on purpose, as pipeline-parallel schedules do with microbatch
+  losses and `torch.distributed.autograd` does with a chain of intermediates. TG001 stays
+  quiet there, because detaching would break the backward rather than save memory. A read
+  that only *reduces* the container (`torch.stack(self.outputs).mean()` at epoch end) needs
+  no graph, so that remains a finding
 
 If a rule misfires on real code, that is a bug worth filing.
 
