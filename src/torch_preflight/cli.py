@@ -24,6 +24,15 @@ EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
 
+RETIRED_RULES = {
+    "TG009": (
+        "TG009 is deliberately not implemented: in-place operations on tensors "
+        "needed for backward already raise a precise error from PyTorch itself, "
+        "naming the tensor and its version counter, so a pre-flight check adds "
+        "nothing useful."
+    ),
+}
+
 SUBCOMMANDS = {"check", "explain", "rules", "estimate", "gpus"}
 
 
@@ -177,16 +186,40 @@ def _print_diff(result) -> None:
 
 
 def _run_explain(code: str) -> int:
-    rule = RULES.get(code.upper())
+    normalized_code = code.upper()
+    rule = RULES.get(normalized_code)
     if rule is None:
+        retired_reason = RETIRED_RULES.get(normalized_code)
+        if retired_reason:
+            print(f"torch-preflight: {retired_reason}", file=sys.stderr)
+            return EXIT_OK
+
+        suggestion = difflib.get_close_matches(normalized_code, RULES, n=1)
+        if suggestion:
+            prefix_matches = [rule_code for rule_code in RULES if rule_code.startswith(normalized_code)]
+            if prefix_matches:
+                suggestion = [prefix_matches[0]]
         print(f"torch-preflight: unknown rule {code}", file=sys.stderr)
+        if suggestion:
+            print(
+                f"help: did you mean {suggestion[0]}? "
+                "Run `torch-preflight rules` to see all 13.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "help: run `torch-preflight rules` to see all 13.",
+                file=sys.stderr,
+            )
         return EXIT_ERROR
 
     console = Console()
     console.print(f"[bold]{rule.code}[/bold]  {rule.summary}")
-    console.print(f"[dim]severity:[/dim] {rule.severity.value}   "
-                  f"[dim]category:[/dim] {rule.category.value}   "
-                  f"[dim]name:[/dim] {rule.name}")
+    console.print(
+        f"[dim]severity:[/dim] {rule.severity.value}   "
+        f"[dim]category:[/dim] {rule.category.value}   "
+        f"[dim]name:[/dim] {rule.name}"
+    )
     console.print()
     console.print(rule.explanation)
     return EXIT_OK
