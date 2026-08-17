@@ -346,6 +346,19 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       ever run the Action as a consumer does. Worth remembering that "our workflows" and
       "the workflow we ship" are different surfaces.
 
+- [x] **Action published to the GitHub Marketplace**, from `v0.3.1` rather than `v0.3.0`.
+      That distinction mattered: `v0.3.0`'s tree still had the old description and the
+      deprecated Node 20 pin, because both fixes landed after it was tagged, and the
+      Marketplace flow offers exactly that tag by default. Cutting 0.3.1 — a release with no
+      package changes at all — was the cheap way to make the listing point at a correct
+      tree. Live at https://github.com/marketplace/actions/torch-preflight
+      Three inbound channels now: PyPI, the Marketplace, and one Reddit post.
+- [x] **0.3.1 released.** The `major-tag` job ran for real for the first time and moved `v0`
+      to the release commit unattended, which is the whole reason it was automated.
+- [x] **Merged branches deleted again**, all nine verified merged first; only `main` remains
+      on either side. This is the second time they have piled up after a release — worth
+      considering whether `--delete-branch` on merge should just be the default.
+
 ## Cross-cutting
 
 - [x] Name and org settled: package `torch-preflight`, org `highwaterlabs`, deliberately
