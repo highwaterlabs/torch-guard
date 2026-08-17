@@ -103,6 +103,134 @@ def test_tg001_quiet_inside_no_grad():
     ) == []
 
 
+def test_tg001_quiet_when_a_getter_hands_the_element_to_a_deferred_backward():
+    """Reduced from ``torch/distributed/pipelining/schedules.py``, where we fired wrongly.
+
+    Pipeline parallelism computes the loss for a microbatch, holds it, and backwards it when
+    the schedule reaches that microbatch. The graph *must* survive the append, so the
+    finding was not merely noisy — following the hint would have broken the schedule.
+    """
+    assert codes(
+        """
+        class PipelineSchedule:
+            def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
+                if stage.is_last and self._loss_fn is not None:
+                    loss = self._compute_loss(output, target_mbs[mb_index])
+                    self._internal_losses.append(loss)
+
+            def _maybe_get_loss(self, stage, mb_index):
+                return self._internal_losses[mb_index]
+        """
+    ) == []
+
+
+def test_tg001_quiet_when_a_held_chain_is_passed_to_a_backward_call():
+    """Reduced from ``torch/testing/_internal/distributed/rpc/dist_autograd_test.py``.
+
+    The dict is a chain of intermediate tensors built precisely so the distributed
+    backward can traverse it. The read reaches the backward through a list, a call and a
+    subscript, which is why the exemption cannot just look at the call's direct arguments.
+    """
+    # Asserted against TG001 alone: the snippet also draws unseeded, which TG008 flags.
+    assert "TG001" not in codes(
+        """
+        import torch
+        from torch.distributed import autograd as dist_autograd
+
+        def test_debug_info(self, context_id):
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
+            i = 0
+            res = {}
+            res[i] = t1
+            for rank in range(self.world_size):
+                res[i + 1] = torch.add(res[i], t2)
+                i += 1
+            dist_autograd.backward(context_id, [res[i].sum()])
+        """
+    )
+
+
+def test_tg001_quiet_when_the_accumulated_sum_is_backwarded():
+    """Summing losses and backwarding once is correct code, not a leak."""
+    assert codes(
+        """
+        def train(model, loader, criterion, optimizer):
+            total = 0.0
+            for batch, y in loader:
+                total += criterion(model(batch), y)
+            optimizer.zero_grad()
+            total.backward()
+        """
+    ) == []
+
+
+def test_tg001_quiet_when_held_losses_are_backwarded_in_a_loop():
+    assert codes(
+        """
+        class Trainer:
+            def step(self, batch, y):
+                self.losses.append(self.criterion(self.model(batch), y))
+
+            def flush(self):
+                for loss in self.losses:
+                    loss.backward()
+        """
+    ) == []
+
+
+def test_tg001_still_fires_when_the_container_is_only_reduced_for_logging():
+    """The exemption needs a *backward*, not any read.
+
+    ``torch.stack(self.outputs).mean()`` is the classic Lightning epoch-end reduction, and
+    it needs no graph — so the retention is still a leak and the hint still applies.
+    """
+    diagnostics = analyze(
+        """
+        import torch
+
+        class LitModel:
+            def training_step(self, batch, y):
+                loss = self.criterion(self.model(batch), y)
+                self.outputs.append(loss)
+                return loss
+
+            def on_train_epoch_end(self):
+                average = torch.stack(self.outputs).mean()
+                self.log("loss", average)
+                self.outputs.clear()
+        """
+    )
+    assert [d.code for d in diagnostics] == ["TG001"]
+
+
+def test_tg001_exemption_does_not_leak_between_functions():
+    """A local ``losses`` backwarded in one function must not excuse another's.
+
+    Instance state legitimately crosses methods, so ``self.*`` matches file-wide — but a
+    bare local name matches only inside its own function. This is the file-wide fact
+    leakage that has already been fixed in `models`, `criteria` and TG008.
+    """
+    diagnostics = analyze(
+        """
+        def deferred(model, loader, criterion):
+            losses = []
+            for batch, y in loader:
+                losses.append(criterion(model(batch), y))
+            losses[0].backward()
+
+        def leaking(model, loader, criterion, optimizer):
+            losses = []
+            for batch, y in loader:
+                loss = criterion(model(batch), y)
+                optimizer.zero_grad()
+                loss.backward()
+                losses.append(loss)
+        """
+    )
+    assert [d.code for d in diagnostics] == ["TG001"]
+
+
 # --------------------------------------------------------------------- TG002
 
 

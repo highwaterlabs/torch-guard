@@ -31,11 +31,14 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   promised, but every rule independently recomputes `dotted_name(node.func)` and
   `final_attr(node.func)` on the same nodes. Caching those on the dispatcher, keyed by node
   identity, should flatten most of the per-rule cost without touching any rule.
-- **A scoped-fact helper.** Four separate rules have now shipped a bug where a file-level
-  fact leaked across functions — `prov.models`, `prov.criteria`, `uses_distributed` and
-  TG008's "does this file train". Each was fixed the same way: walk out from the current
-  scope, stop at the first binding. That deserves to be one helper on `Rule` rather than a
-  pattern everyone re-implements and half of us get wrong the first time.
+- **A scoped-fact helper.** Five separate rules have now hit a bug where a file-level fact
+  leaked across functions — `prov.models`, `prov.criteria`, `uses_distributed`, TG008's "does
+  this file train", and TG001's deferred-backward exemption. Each was fixed the same way:
+  walk out from the current scope, stop at the first binding. That deserves to be one helper
+  on `Rule` rather than a pattern everyone re-implements and half of us get wrong the first
+  time. TG001 is the case that shows the helper needs *two* modes: `self.*` attributes are
+  instance state and should match file-wide, since being written in one method and read in
+  another is the normal shape, while bare locals must not.
 - Cross-file resolution: today the provenance analysis stops at file boundaries. A model
   defined in `models.py` and trained in `train.py` is the common layout, and we currently
   lean on naming conventions to bridge it.

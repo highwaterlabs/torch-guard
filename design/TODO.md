@@ -63,6 +63,11 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       - `dist_autograd_test.py:2086,2098` — TG001, a dict deliberately chaining
         graph-attached tensors across ranks
 
+      **The judgment on the three TG001 lines was wrong** — see the deferred-backward entry
+      below. "Intentional, so `# noqa` it" is only the right answer when the intent is
+      invisible to us; here it was structural and we could have detected it. The TG003 line
+      stands.
+
       Reproduce with: `torch-preflight check <site-packages>/torch -f json`
 
 ### Known gaps that came out of building it
@@ -358,6 +363,51 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 - [x] **Merged branches deleted again**, all nine verified merged first; only `main` remains
       on either side. This is the second time they have piled up after a release — worth
       considering whether `--delete-branch` on merge should just be the default.
+
+- [x] **TG001 no longer fires on a deferred backward.** Came out of asking whether we should
+      raise PRs against PyTorch and other repos for the findings we had. Re-reading the three
+      TG001 lines to write those PRs showed they were *our* bug, not torch's, and the earlier
+      "intentional, so `# noqa` it" verdict had been too generous to the rule:
+      - `pipelining/schedules.py:304` holds each microbatch loss so the schedule can backward
+        it when it reaches that microbatch. Taking our hint would have broken the schedule.
+      - `dist_autograd_test.py:2086,2098` builds a dict chaining graph-attached tensors
+        precisely so `dist_autograd.backward(ctx, [res[i].sum()])` can traverse it.
+
+      Both are the same shape: **retention that a later backward depends on**, which is the
+      one case where TG001's advice is not merely noisy but wrong. So a container is now
+      exempt once an element read out of it reaches a backward pass — on the element
+      directly, through a backward-taking call at any depth (the `dist_autograd` read is
+      behind a list, a call and a subscript), or by being returned to a caller who does it.
+      `total += loss` followed by `total.backward()` is exempt for the same reason, and that
+      was a latent false positive nothing had hit yet.
+
+      Three things worth keeping:
+      - **The exemption needs a backward, not any read.** `torch.stack(self.outputs).mean()`
+        at epoch end is the classic Lightning reduction and needs no graph, so that stays a
+        finding. A read that only reduces or logs proves the retention was avoidable.
+      - **Only subscript reads count as escaping via `return`.** `return loss` is the
+        Lightning leak's own shape; `return self._internal_losses[i]` is a getter for a held
+        graph. Collapsing the two would have silenced the rule's most common true positive.
+      - **`self.*` matches file-wide, bare locals only within their function.** Instance
+        state genuinely crosses methods — that is the whole pipelining shape — but scoping
+        the local case is the file-wide fact leakage that has now bitten `models`,
+        `criteria`, `uses_distributed` and TG008. Fifth time; the shared scoped-fact helper
+        in [IDEAS.md](IDEAS.md) keeps earning its place.
+
+      Findings on torch's 2,285 files: 23 -> 20. Nothing else moved.
+
+- [ ] **Scan a set of real training repos, triage by hand, then decide on PRs.** The torch
+      scan is a poor source of PR-able findings and that is structural, not bad luck: 20 of
+      the 23 are in `torch/testing/_internal`, where a deliberate `cuda.synchronize()` or a
+      host-side factory in test setup costs nothing, and the framework itself contains no
+      training loops for the rules to be about. Our rules are about *training scripts*, so
+      the targets are repos that contain them — `pytorch/examples` and `pytorch/tutorials`
+      rather than `pytorch/pytorch`, then `transformers/examples/pytorch`, `torchtune`,
+      `litgpt`, `trl`, `LLaMA-Factory`. A bug in an examples repo is worth more than the same
+      bug in core, because those files get copy-pasted into thousands of projects.
+      Every finding gets read by hand before anything is filed. The base rate says why:
+      TG013 went 57 -> 14 -> 8 on this codebase, and the pipelining case above would have
+      been a rejected PR in `pytorch/pytorch` arguing against a design we had not understood.
 
 ## Cross-cutting
 
