@@ -254,7 +254,7 @@ source tree takes about four minutes with all 13 rules.
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/highwaterlabs/torch-preflight
-    rev: v0.2.0
+    rev: v0.4.0
     hooks:
       - id: torch-preflight
 ```

@@ -3,6 +3,95 @@
 All notable changes to torch-preflight are recorded here. This project follows
 [semantic versioning](https://semver.org/).
 
+## [0.4.0] — 2026-08-18
+
+Two rounds of triaging real training code. torch-preflight was run over seven repositories
+whose product is training runs — `pytorch/examples`, `pytorch/tutorials`, `torchtune`,
+`litgpt`, `trl`, `LLaMA-Factory` and `transformers/examples/pytorch`, 1,615 files — and every
+TG001, TG003, TG005 and TG014 finding was read by hand. That produced **one** bug worth
+reporting upstream and **nine in this tool**. Errors across those repos fell from 63 to 32
+with no new findings.
+
+### ⚠️ Breaking: what fails your build has changed
+
+If you rely on `torch-preflight` to fail CI, read this before upgrading.
+
+- **TG001 on an already-backwarded tensor is now a `warning`, not an `error`.** The classic
+  `loss.backward(); losses.append(loss)` no longer fails a build under the default
+  `fail_on = "error"`. This is a correction, not a relaxation: `backward()` frees each node's
+  saved tensors as it traverses, so that shape retains **0 bytes** of activations. The
+  measurement is in `tests/calibration/measure_retention.py` and
+  [RFC 0003](design/rfcs/0003-severity-and-ci-gating.md) §2. Storing a tensor that *nothing*
+  backwards is still an error, and still the CUDA OOM the rule was written for.
+- **TG004 is now a `note`**, and notes never gate a build.
+- To restore the previous behaviour for either, set `fail_on = "warning"`, or re-level the
+  individual rule:
+
+  ```toml
+  [tool.torch-preflight.severity]
+  TG001 = "error"
+  ```
+
+### Added
+
+- **Severity has a definition** ([RFC 0003](design/rfcs/0003-severity-and-ci-gating.md)), on
+  one axis — what happens if you ship this. `error` means the run is wrong or dies; `warning`
+  means a real defect with a bounded blast radius; `note` means the code is correct but
+  untuned. The deciding question is "is this code defective, or merely untuned?", and it is
+  written down in `docs/rules.md` so future rules are not levelled by feel.
+- `fail_on = "warning"` is now recommended in the README and `docs/ci.md` for repositories
+  whose product is training runs. TG004 becoming a note is what makes that setting usable —
+  it was 207 of the 318 findings across the seven repos, 13% of every file scanned.
+- `tests/calibration/measure_retention.py`, which measures what a retained graph actually
+  holds. On a 4-layer transformer: **186 MiB of activations per iteration** when nothing
+  backwards them — enough to OOM an 80 GB A100 in ~440 steps — against **0 KiB** when
+  something does, with ~15 KiB/iteration of host bookkeeping either way.
+
+### Fixed
+
+- **TG001 no longer fires on retention a backward pass depends on.** Rewritten around
+  reachability rather than syntax, because `torch.stack(losses).mean()` is a throwaway
+  reduction when it is logged and load-bearing when it becomes the training loss, and the two
+  are written identically. Pipeline-parallel schedules, chunked loss modules that accumulate
+  per-chunk losses and return the total, RL objectives that stack per-step losses, and
+  `torch.distributed.autograd` chains are all quiet now. Following the old hint would have
+  broken those runs rather than saving memory.
+- **TG005 no longer reads an attention softmax as the model's output activation.**
+  `pytorch/examples/gat/main.py` binds `self.softmax = nn.Softmax(dim=1)` to normalise
+  attention coefficients and correctly ends in `F.log_softmax`. Attention softmax appears in
+  every transformer and GNN, so constructing the layer is not evidence; final position in an
+  `nn.Sequential` is.
+- **TG005 reads the layer class rather than the attribute name.**
+  `self.softmax = nn.LogSoftmax(dim=1)` feeding `NLLLoss` is correct code — and is what
+  PyTorch's own char-RNN tutorial does, which we were reporting as a convergence bug.
+- **TG014 recognises gradient-level rescaling.** torchtune weights each micro-batch loss by
+  its token count and applies `scale_grads_(params, 1/num_tokens)` before `step()`, a
+  token-mean across uneven micro-batches. Our hint would have told them to divide again and
+  shrink the gradient by the accumulation factor. Also resolved when the rescaler is called
+  through an alias.
+- **Values produced under `torch.no_grad()` no longer propagate a graph.** The standard
+  evaluation loop wraps only the forward and uses the result after the block, where a
+  positional check cannot see it.
+
+### Changed
+
+- The README no longer claims a retained graph costs "every intermediate activation" in all
+  cases; it shows both shapes and the measured difference between them. The previous wording
+  overstated the tool's own headline example.
+- Corrected stale figures: PyTorch's source produces **20** findings across 2,285 files, not
+  23, and "every one triaged as deliberate" was no longer true once three of them turned out
+  to be our own bug.
+- The documented pre-commit `rev:` pins had drifted to `v0.1.0` and `v0.2.0` and now track the
+  current release.
+
+### Known gaps
+
+Two false-positive causes are understood, measured and deliberately not fixed here, because
+each needs a design change rather than a patch — both are recorded in
+[IDEAS.md](design/IDEAS.md) with the file and line that exposed them: within-file callee
+return types, and flow sensitivity within a scope. The latter is why the `no_grad` fix above
+does not yet clear the standard Hugging Face evaluation loop.
+
 ## [0.3.1] — 2026-08-17
 
 **No changes to the Python package.** This release exists so the GitHub Action can be
