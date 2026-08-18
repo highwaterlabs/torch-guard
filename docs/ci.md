@@ -9,6 +9,11 @@
     format: github        # inline PR annotations
 ```
 
+`fail-on` defaults to `error`. For a repository whose product is training runs, use
+`fail-on: warning` — it adds the retained-graph, device-sync and unseeded-run findings to the
+gate, while `DataLoader` tuning notes stay out of it. [What the levels
+mean](rules.md#what-the-levels-mean).
+
 Or with code scanning:
 
 ```yaml

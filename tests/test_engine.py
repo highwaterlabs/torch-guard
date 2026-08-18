@@ -156,15 +156,25 @@ def test_syntax_error_fails_the_run(tmp_path):
 
 
 def test_fail_on_threshold_ignores_warnings_by_default(tmp_path):
+    target = tmp_path / "warn.py"
+    target.write_text(textwrap.dedent(LEAKY.format(suffix="")))
+    result = check_paths([tmp_path], Config())
+    assert result.counts_by_severity()[Severity.WARNING] == 1
+    assert not result.should_fail(Severity.ERROR)
+    assert result.should_fail(Severity.WARNING)
+
+
+def test_notes_sit_below_the_warning_gate(tmp_path):
+    """RFC 0003: a note is untuned code, so no ordinary threshold should gate on it."""
     target = tmp_path / "loader.py"
     target.write_text(
         'import torch\nfrom torch.utils.data import DataLoader\n'
         'device = torch.device("cuda")\nloader = DataLoader(ds)\n'
     )
     result = check_paths([tmp_path], Config())
-    assert result.counts_by_severity()[Severity.WARNING] == 2
-    assert not result.should_fail(Severity.ERROR)
-    assert result.should_fail(Severity.WARNING)
+    assert result.counts_by_severity()[Severity.NOTE] == 2
+    assert result.counts_by_severity()[Severity.WARNING] == 0
+    assert not result.should_fail(Severity.WARNING)
 
 
 # ---------------------------------------------------------------- reporters

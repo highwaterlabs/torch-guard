@@ -55,8 +55,8 @@ Found 1 error in 1 file(s).
 - 🛠️ **Autofixes** via concrete syntax tree rewrites, so formatting and comments survive untouched
 - 📊 **Measured, not guessed** — every constant calibrated against real hardware, **3.7% mean
   error** versus measured peaks
-- 🤫 **Quiet on real code** — **23 findings across PyTorch's own 2,285 files**, roughly one per
-  hundred, every one triaged
+- 🤫 **Quiet on real code** — **20 findings across PyTorch's own 2,285 files**, roughly one per
+  hundred, every one read by hand
 - ⚡ **No GPU and no PyTorch required** — pure static analysis over [LibCST](https://github.com/Instagram/LibCST); a CI job asserts torch is never imported
 - 🐍 Python 3.9–3.13, `pyproject.toml` config, pre-commit hook, GitHub Action, SARIF output
 
@@ -243,9 +243,9 @@ Memory estimators are easy to write and easy to be quietly wrong about. So:
 | **Projections are checked** | **3.7% mean absolute error** against measured peaks for GPT-2, BERT, DistilBERT and ResNet-50 on a T4. Harness and fixtures in [`tests/calibration/`](https://github.com/highwaterlabs/torch-preflight/tree/main/tests/calibration/), so you can re-run them. |
 | **Gaps are stated, not papered over** | `offload_param` streams parameters in, so the resident set is smaller than the weights term — we have not measured it, so the report says the real peak is lower rather than inventing a fraction. Grouped-query attention does *not* reduce training activations (measured: `repeat_kv` materialises full-size K/V), so it is not modelled as if it did. |
 | **It refuses to guess** | An unrecognised model reports `UNKNOWN` and widens the interval rather than inventing a parameter count. Verdicts are bands with an error range, never a fabricated "95% risk" score. |
-| **It stays quiet** | **23 findings across PyTorch's own 2,285 files** — about one per hundred — every one triaged as deliberate. Those passes found real bugs in the rules, each now regression-tested. |
+| **It stays quiet** | **20 findings across PyTorch's own 2,285 files** — about one per hundred — every one read by hand. Triage is also where most of our own bugs come from: three findings we had filed as "intentional, so suppress it" turned out to be the rule misunderstanding deferred backward, and a scan of seven training repos found nine more. Each is now regression-tested against the file that exposed it. |
 
-**416 tests.** A typical project lints in well under a second; PyTorch's entire 2,285-file
+**435 tests.** A typical project lints in well under a second; PyTorch's entire 2,285-file
 source tree takes about four minutes with all 13 rules.
 
 ## Integrations
@@ -269,6 +269,12 @@ repos:
 
 SARIF output feeds GitHub code scanning; JSON feeds everything else. Set `target_gpu` in
 `pyproject.toml` and CI fails on a projected OOM before the job is ever submitted.
+
+By default the build fails on **errors** — wrong results and OOM. If the repository's product
+*is* training runs, add `fail-on: warning` to catch the smaller defects too: retained graphs
+whose backward has already run, per-element device syncs, unseeded runs. Tuning observations
+like `num_workers=0` are notes and never fail a build, which is what keeps that setting
+usable. See [RFC 0003](design/rfcs/0003-severity-and-ci-gating.md).
 
 See [CI integration →](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/ci.md)
 
