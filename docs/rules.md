@@ -2,7 +2,7 @@
 
 | Code | Severity | Category | Problem |
 |------|----------|----------|---------|
-| **TG001** | error | `CRITICAL_OOM` | A tensor is stored (`losses.append(loss)`, `total += loss`, `cache[k] = out`) with its autograd graph still attached |
+| **TG001** | error / warning | `CRITICAL_OOM` / `PERFORMANCE_WARN` | A tensor is stored (`losses.append(loss)`, `total += loss`, `cache[k] = out`) with its autograd graph still attached. Error when nothing backwards it, so the activations are retained; warning when backward has already freed them |
 | **TG002** | error | `CRITICAL_OOM` | Validation/inference runs a forward pass without `torch.no_grad()` / `inference_mode()` |
 | **TG003** | error | `CONVERGENCE_BUG` | `.backward()` runs in a loop with no `zero_grad()` anywhere in it |
 | **TG004** | warning | `PERFORMANCE_WARN` | `DataLoader` with `num_workers=0` or no `pin_memory` while the file targets CUDA |
@@ -36,9 +36,9 @@ examples/bad_train.py
       │             ^^^^^^^^^^^^^^^
   help: Add `optimizer.zero_grad(set_to_none=True)` at the start of the loop body (or right after `optimizer.step()`).
 
-  45:27  error   TG001 (CRITICAL_OOM)
-  `losses.append(...)` stores a tensor that is still attached to the autograd graph; every iteration's graph is retained in VRAM.
-   45 │             losses.append(loss)      # TG001: keeps the whole graph alive
+  48:27  warning TG001 (PERFORMANCE_WARN)
+  `losses.append(...)` keeps a graph-attached tensor whose backward has already run. Its activations are freed, so what accumulates is the graph nodes — host memory rather than VRAM, but still growing every iteration, and the stored value stays silently differentiable.
+   48 │             losses.append(loss)      # TG001: retains graph nodes (backward already ran)
       │                           ^^^^
   help: Use `.item()` to keep just the scalar value, or `.detach()` to keep the tensor without its graph.
   fix:  add .detach() (run with --fix)
@@ -63,12 +63,17 @@ cost of occasional noise. Known suppressions already built in:
 - `zero_grad()` inside an `if` in the loop — deliberate gradient accumulation
 - pytest's `test_*` functions, which legitimately exercise autograd
 - containers created fresh inside the loop body, which cannot accumulate
-- **retention a later backward depends on** — a container whose elements reach a backward
+- **retention a later backward depends on** — a container whose contents reach a backward
   pass is holding those graphs on purpose, as pipeline-parallel schedules do with microbatch
-  losses and `torch.distributed.autograd` does with a chain of intermediates. TG001 stays
-  quiet there, because detaching would break the backward rather than save memory. A read
-  that only *reduces* the container (`torch.stack(self.outputs).mean()` at epoch end) needs
-  no graph, so that remains a finding
+  losses, chunked loss modules do when they accumulate per-chunk losses and return the total,
+  and `torch.distributed.autograd` does with a chain of intermediates. TG001 stays quiet
+  there, because detaching would break the backward rather than save memory.
+
+  This is decided by reachability, not by syntax. `torch.stack(losses).mean()` is a throwaway
+  reduction when it is logged and load-bearing when it becomes the training loss, and the two
+  are written identically — so the logging case is still reported and the loss case is not.
+  Handing back a bare container (`return losses`) is *not* treated as evidence either way,
+  since a caller is as likely to read values out of it as to backward through it
 
 If a rule misfires on real code, that is a bug worth filing.
 

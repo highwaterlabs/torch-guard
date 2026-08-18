@@ -80,11 +80,31 @@ probability reporting only.
     # ------------------------------------------- case 3: an activation in the model
 
     def _check_layer(self, node: cst.Call) -> None:
+        """A model whose ``nn.Sequential`` *ends* in a softmax layer, with a fused loss.
+
+        Deliberately narrow, for the same reason TG006's sigmoid check is. An earlier
+        version flagged any ``nn.Softmax(...)`` construction in a file that mentioned
+        ``NLLLoss`` or ``CrossEntropyLoss`` anywhere, and fired on
+        ``pytorch/examples/gat/main.py``, where ``self.softmax = nn.Softmax(dim=1)``
+        normalises **attention coefficients** over neighbours and the model correctly ends
+        in ``F.log_softmax``. Attention softmax appears in every transformer and GNN, so
+        constructing the layer cannot be the evidence — final position in a ``Sequential``
+        can be.
+        """
+        if final_attr(node.func) != "Sequential":
+            return
+        sequential = dotted_name(node.func) or ""
+        if not (sequential.startswith(("nn.", "torch.nn.")) or sequential == "Sequential"):
+            return
+
+        args = positional_args(node)
+        if not args:
+            return
+        node = args[-1].value
+        if not isinstance(node, cst.Call):
+            return
         leaf = final_attr(node.func)
         if leaf not in SOFTMAX_LAYERS:
-            return
-        dotted = dotted_name(node.func) or ""
-        if not (dotted.startswith(("nn.", "torch.nn.")) or dotted == leaf):
             return
 
         if leaf == "Softmax" and self.ctx.uses_cross_entropy:

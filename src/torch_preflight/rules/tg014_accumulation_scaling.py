@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import libcst as cst
 
-from ..analysis.helpers import contains_call_to, dotted_name
+from ..analysis.helpers import contains_call_to, dotted_name, final_attr
 from ..diagnostics import Category, Severity
 from .base import Rule, register
 
@@ -82,6 +82,67 @@ def _applies_gradients(tree: cst.CSTNode) -> bool:
     return finder.found
 
 
+#: Calls that rescale the *gradients* before ``step()`` instead of dividing the loss.
+#: torchtune weights each micro-batch loss by its token count and then applies
+#: ``training.scale_grads_(params, 1.0 / num_tokens)``, which is a token-mean across
+#: micro-batches of unequal length — a better normalisation than dividing by the step
+#: count, not a missing one.
+GRADIENT_RESCALE = "scale_grad"
+
+
+def _mentions_rescale(tree: cst.CSTNode) -> bool:
+    """Does any name in this expression refer to a gradient rescaler?"""
+
+    class _Probe(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.found = False
+
+        def visit_Name(self, node: cst.Name) -> bool:
+            if GRADIENT_RESCALE in node.value:
+                self.found = True
+            return True
+
+    probe = _Probe()
+    tree.visit(probe)
+    return probe.found
+
+
+class _RescaleAliasFinder(cst.CSTVisitor):
+    """Names bound to a gradient rescaler, so a call through one still counts.
+
+    torchtune's distributed recipe does ``self._grad_scaler = training.scale_grads_`` and
+    then calls ``self._grad_scaler(...)``, optionally wrapped in ``torch.compile(...)``.
+    The call site's own name carries no evidence, which is the same shape as TG005 reading
+    an attribute's name instead of the class it was bound to.
+    """
+
+    def __init__(self) -> None:
+        self.aliases: set = set()
+
+    def visit_Assign(self, node: cst.Assign) -> bool:
+        if _mentions_rescale(node.value):
+            for target in node.targets:
+                name = dotted_name(target.target)
+                if name:
+                    self.aliases.add(name)
+        return True
+
+
+class _GradientRescaleFinder(cst.CSTVisitor):
+    """Did anything rescale the gradients between the backwards and the step?"""
+
+    def __init__(self, aliases: set) -> None:
+        self.aliases = aliases
+        self.found = False
+
+    def visit_Call(self, node: cst.Call) -> bool:
+        if GRADIENT_RESCALE in (final_attr(node.func) or ""):
+            self.found = True
+        elif (dotted_name(node.func) or "") in self.aliases:
+            self.found = True
+        return True
+
+
 class _DivisionFinder(cst.CSTVisitor):
     """Any division or in-place division by one of the given divisors."""
 
@@ -132,6 +193,16 @@ scale internally — dividing again there would shrink the gradient by N instead
 stays silent when it can see one of those in the file.
 """.strip()
 
+    _aliases: Optional[set] = None
+
+    def _rescale_aliases(self) -> set:
+        """Computed once per file, on the first backward this rule reaches."""
+        if self._aliases is None:
+            finder = _RescaleAliasFinder()
+            self.ctx.module.visit(finder)
+            self._aliases = finder.aliases
+        return self._aliases
+
     def visit_Call(self, node: cst.Call) -> bool:
         func = node.func
         if not isinstance(func, cst.Attribute) or func.attr.value != "backward":
@@ -169,6 +240,14 @@ stays silent when it can see one of those in the file.
         division = _DivisionFinder(divisors)
         loop.node.visit(division)
         if division.found:
+            return True
+
+        # Dividing the loss is the common compensation, not the only one. Scaling the
+        # gradients before `step()` achieves the same thing, and telling those callers to
+        # divide as well would shrink the gradient by the accumulation factor.
+        rescale = _GradientRescaleFinder(self._rescale_aliases())
+        loop.node.visit(rescale)
+        if rescale.found:
             return True
 
         divisor = sorted(divisors)[0]

@@ -64,6 +64,14 @@ class _FactCollector(cst.CSTVisitor):
     def __init__(self) -> None:
         super().__init__()
         self.imports: Set[str] = set()
+        #: name -> (callee it was assigned from, the callee's last segment). Resolved at
+        #: the end against `softmax_layers`, because the *name* of a module attribute is
+        #: not its class: `self.softmax = nn.LogSoftmax(dim=1)` is correct code feeding
+        #: NLLLoss, and reading `self.softmax(x)` as a plain softmax reported PyTorch's own
+        #: char-RNN tutorial as a convergence bug.
+        self.softmax_calls: Dict[str, tuple] = {}
+        #: `self.softmax = nn.LogSoftmax(...)` -> {"self.softmax": "log_softmax"}
+        self.softmax_layers: Dict[str, str] = {}
         self.softmax_vars: Dict[str, str] = {}
         self.uses_cross_entropy = False
         self.uses_nll_loss = False
@@ -99,11 +107,18 @@ class _FactCollector(cst.CSTVisitor):
         value = node.value
         if isinstance(value, cst.Call):
             leaf = final_attr(value.func)
-            if leaf in ("softmax", "log_softmax"):
+            if leaf in ("Softmax", "LogSoftmax"):
+                kind = "softmax" if leaf == "Softmax" else "log_softmax"
                 for target in node.targets:
                     name = dotted_name(target.target)
                     if name:
-                        self.softmax_vars[name] = leaf
+                        self.softmax_layers[name] = kind
+            if leaf in ("softmax", "log_softmax"):
+                callee = dotted_name(value.func) or ""
+                for target in node.targets:
+                    name = dotted_name(target.target)
+                    if name:
+                        self.softmax_calls[name] = (callee, leaf)
             elif leaf in ("sigmoid", "Sigmoid"):
                 for target in node.targets:
                     name = dotted_name(target.target)
@@ -142,6 +157,12 @@ def build_context(path: str, source: str, module: Optional[cst.Module] = None) -
 
     facts = _FactCollector()
     module.visit(facts)
+
+    # Resolve each softmax-producing call against the layer it was actually bound to. This
+    # runs after the walk rather than during it, so it does not depend on `__init__` being
+    # visited before `forward` — a module attribute's *name* is not its class.
+    for name, (callee, leaf) in facts.softmax_calls.items():
+        facts.softmax_vars[name] = facts.softmax_layers.get(callee, leaf)
 
     return FileContext(
         path=path,

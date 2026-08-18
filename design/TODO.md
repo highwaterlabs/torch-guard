@@ -396,7 +396,68 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
 
       Findings on torch's 2,285 files: 23 -> 20. Nothing else moved.
 
-- [ ] **Scan a set of real training repos, triage by hand, then decide on PRs.** The torch
+- [x] **Scanned seven real training repos and triaged the high-value findings by hand.**
+      1,615 files, 318 findings — 0.20/file against torch's 0.0087, which is the difference
+      between scanning training code and scanning a framework. Reading every TG001/003/005/014
+      site produced **one** PR-able finding and **nine bugs in us**, so the tool was not ready
+      to file anything. Repos: `pytorch/examples`, `pytorch/tutorials`, `torchtune`, `litgpt`,
+      `trl`, `LLaMA-Factory`, `transformers/examples/pytorch`. Raw JSON and the full triage
+      are reproducible with `torch-preflight check <repo> --format json`.
+
+      Fixed on this branch, verified by re-scanning: **errors 63 -> 32, twenty false positives
+      removed, zero new findings.**
+      - **TG001 rewritten around backward-reachability** (48 -> 32). The old exemption was
+        syntactic and could not tell `torch.stack(losses).mean()` used for logging from the
+        same line used as the training loss. Now a holder is exempt when its value reaches a
+        backward or a *derived* return, computed as a fixpoint over assignment edges. Killed
+        the chunked-loss false positives in `torchtune/modules/loss/`, the RL objectives in
+        `trl` and `examples/reinforcement_learning/actor_critic.py`, and LLaMA-Factory's PPO.
+      - **TG001 severity split, and it needed a measurement.** `backward()` frees each node's
+        saved tensors as it traverses, so a tensor stored *after* its backward retains graph
+        nodes and no activations. `tests/calibration/measure_retention.py` walks the live
+        graph: **560 KiB of activations per iteration** retained when nothing backwards them,
+        **0 KiB** when something does, ~30 nodes per iteration either way. So error/CRITICAL_OOM
+        for the first and warning/PERFORMANCE_WARN for the second. **Our README's headline
+        example was the second shape**, which means the flagship claim overstated the flagship
+        example; it now shows both and explains the difference.
+        RSS was the obvious instrument and the wrong one — three runs of identical code spread
+        over 5.8-20.9 KiB/iteration, so the harness measures the graph directly instead.
+      - **TG005 no longer reads a submodule as the model's output activation.**
+        `pytorch/examples/gat/main.py` has `self.softmax = nn.Softmax(dim=1)` for **attention
+        coefficients** and correctly ends in `F.log_softmax`. Attention softmax is in every
+        transformer and GNN, so constructing the layer cannot be the evidence — final position
+        in a `Sequential` is, matching the TG006 sigmoid fix.
+      - **TG005 reads the constructor, not the attribute name.**
+        `char_rnn_generation_tutorial.py` binds `self.softmax = nn.LogSoftmax(dim=1)`, which is
+        correct for `NLLLoss`. We reported PyTorch's own tutorial as a convergence bug because
+        the name won over a constructor two lines away.
+      - **TG014 recognises gradient-level rescaling.** torchtune weights each micro-batch loss
+        by its token count and applies `scale_grads_(params, 1/num_tokens)` before `step()` — a
+        token-mean across uneven micro-batches, a *better* normalisation than dividing by the
+        step count. Our hint would have introduced a real bug. Also resolves the call through
+        an alias, since the distributed recipe binds `self._grad_scaler = training.scale_grads_`
+        so it can wrap it in `torch.compile` — the same "read the binding, not the name" lesson
+        as TG005, in the same afternoon.
+      - **Values produced under `no_grad` no longer propagate a graph.** The standard eval loop
+        wraps only the forward and uses the result after the block, where a positional check
+        cannot see it.
+
+      Two causes deliberately **not** fixed here, both needing design work rather than a patch,
+      recorded with their evidence in [IDEAS.md](IDEAS.md): within-file callee return types
+      (6 findings) and flow sensitivity within a scope (6 findings, and the reason the `no_grad`
+      fix does not yet clear the Hugging Face eval loop).
+
+      What survives as genuinely PR-able: **TG003 x3 in
+      `pytorch/examples/distributed/tensor_parallelism/`** — `backward()` then `step()` in a
+      loop with no `zero_grad()` anywhere in the file, in three official examples people copy.
+      One line each.
+
+      Also worth deciding separately: **TG004 is 207 of the 318**, 13% of every file scanned,
+      all "unset `num_workers`" or "no `pin_memory`". Factually right and not actionable at that
+      volume — tutorials keep it simple deliberately. Note `litgpt` came back **137 files, 0
+      errors**, so careful code does scan clean.
+
+- [ ] **File the tensor-parallelism PR, and decide on TG004's default severity.** The torch
       scan is a poor source of PR-able findings and that is structural, not bad luck: 20 of
       the 23 are in `torch/testing/_internal`, where a deliberate `cuda.synchronize()` or a
       host-side factory in test setup costs nothing, and the framework itself contains no
