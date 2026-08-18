@@ -5,6 +5,9 @@ import textwrap
 
 from torch_preflight.cli import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, main
 
+# Nothing backwards this loss, so its activations really are retained and TG001 reports an
+# error. The append-after-backward shape is a warning (see test_rules), which would not
+# exercise the non-zero exit path these tests are about.
 LEAKY = textwrap.dedent(
     """
     def train(model, loader, criterion, optimizer):
@@ -12,7 +15,6 @@ LEAKY = textwrap.dedent(
         for batch, y in loader:
             loss = criterion(model(batch), y)
             optimizer.zero_grad()
-            loss.backward()
             losses.append(loss)
     """
 ).lstrip("\n")

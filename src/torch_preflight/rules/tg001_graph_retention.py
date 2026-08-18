@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set, Tuple
 
 import libcst as cst
 
 from ..analysis.helpers import attach_method, dotted_name, final_attr
-from ..analysis.scope import ScopePath
+from ..analysis.scope import ScopePath, target_names
 from ..diagnostics import Category, Severity
 from .base import Rule, register
 
 ACCUMULATING_METHODS = {"append", "add", "extend", "insert", "put", "push"}
+
+#: A name, keyed to the scope that owns it. ``self.losses`` is instance state and keys to
+#: ``None`` so it matches file-wide; a bare local keys to its enclosing function.
+Key = Tuple[Optional[ScopePath], str]
 
 
 @dataclass
@@ -20,11 +24,10 @@ class _Candidate:
     """A finding held back until the whole module has been read."""
 
     node: cst.CSTNode
-    #: The container (or accumulator) whose retention is in question.
-    holder: str
-    #: Scope key the holder belongs to; ``None`` for ``self.*`` instance state.
-    scope: Optional[ScopePath]
-    message: str
+    holder: Key
+    #: Names read in the stored expression, for deciding whether its graph was freed.
+    stored: Set[Key]
+    subject: str
     hint: str
 
 
@@ -36,18 +39,28 @@ class GraphRetention(Rule):
     severity = Severity.ERROR
     category = Category.CRITICAL_OOM
     explanation = """
-Appending a tensor that still carries ``grad_fn`` keeps its entire computational graph
-alive in VRAM. The graph holds every intermediate activation produced on the way to that
-tensor, so a training loop that logs one loss per step retains one full graph per step.
-Memory grows linearly with iteration count and the run dies with CUDA OOM partway
-through - usually after hours of GPU time.
+Storing a tensor that still carries ``grad_fn`` keeps its computational graph reachable. How
+much that costs depends on one thing: whether the graph has already been backwarded.
 
-Call ``.item()`` for scalars you only want to log, or ``.detach()`` for tensors you need
-to keep as tensors.
+**Never backwarded** — the graph still holds every intermediate activation produced on the way
+to that tensor. A validation loop appending outputs, or a container built up for a single
+backward later, retains one full graph per iteration. Memory grows linearly and the run dies
+with CUDA OOM partway through, usually after hours of GPU time. Reported as an error.
 
-**Deferred backward is not a leak, and this rule does not flag it.** Some code stores
-graph-attached tensors precisely so a backward pass can run over them later, and detaching
-would break it::
+**Already backwarded** — ``backward()`` releases the saved tensors as it traverses, so a
+tensor stored *after* its backward retains the graph nodes but none of the activations.
+Measured on a 13x256 MLP (``tests/calibration/measure_retention.py``): **560 KiB of
+activations per iteration** still reachable when nothing backwards them, and **0 KiB** when
+something does — with the same ~30 graph nodes per iteration held either way. Those nodes are
+host-side bookkeeping, not VRAM. The retention is real and still grows linearly, but it will
+not OOM the GPU, so it is reported as a warning rather than an error.
+
+Either way the fix is the same. Call ``.item()`` for scalars you only want to log, or
+``.detach()`` for tensors you need to keep as tensors.
+
+**Retention a later backward depends on is not a leak, and this rule does not flag it.** Some
+code stores graph-attached tensors precisely so a backward pass can run over them, and
+detaching would break it rather than save memory::
 
     def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
         loss = self._compute_loss(output, target_mbs[mb_index])
@@ -56,32 +69,35 @@ would break it::
     def _maybe_get_loss(self, stage, mb_index):
         return self._internal_losses[mb_index]  # the graph is still needed here
 
-That is how pipeline parallelism schedules microbatches: the loss for each microbatch is
-computed on one rank, held, and backwarded when the schedule reaches it. The same shape
-appears in ``torch.distributed.autograd``, where a chain of intermediate tensors is kept so
-``dist_autograd.backward(context_id, [res[i].sum()])`` can traverse it.
+That is how pipeline parallelism schedules microbatches. The same shape appears in chunked
+loss modules that accumulate per-chunk losses and return the total, in RL objectives that
+stack per-step losses and backward the sum, and in ``torch.distributed.autograd``.
 
-So a container is exempt once an element read out of it reaches a backward pass — directly,
-via a backward-taking call, or by being returned to a caller who does the backward. The
-retention is then load-bearing, and the only honest advice is none.
+So a holder is exempt when its value reaches a backward pass, or is returned to a caller we
+cannot follow. That is a reachability question, not a syntactic one:
+``torch.stack(losses).mean()`` is a throwaway reduction when it is logged and load-bearing
+when it becomes the training loss, and the two are written identically.
 """.strip()
 
     def __init__(self, ctx) -> None:
         super().__init__(ctx)
         self._candidates: List[_Candidate] = []
-        #: Holders whose contents a backward pass still needs. See ``_note_backward_feed``.
-        self._backward_fed: Set[Tuple[Optional[ScopePath], str]] = set()
+        #: ``target -> names read in whatever was assigned to it``. Reachability runs
+        #: backwards along these edges: if a value is needed, so is everything it came from.
+        self._flows_from: Dict[Key, Set[Key]] = {}
+        self._backward_seeds: Set[Key] = set()
+        self._return_seeds: Set[Key] = set()
 
     # ------------------------------------------------------------------ collection
 
     def visit_Call(self, node: cst.Call) -> bool:
-        # A backward pass reads whatever it is handed, so record those holders before
-        # considering any candidate -- a call can be both, as in `losses[i].backward()`.
+        # A backward pass reads whatever it is handed. Record that before considering any
+        # candidate, since one call can be both -- `losses[i].backward()`.
         if self._is_backward_call(node):
             for arg in node.args:
-                self._note_backward_feed(arg.value)
+                self._backward_seeds |= self._read_keys(arg.value)
             if isinstance(node.func, cst.Attribute):
-                self._note_backward_feed(node.func.value)
+                self._backward_seeds |= self._read_keys(node.func.value)
             return True
 
         func = node.func
@@ -107,21 +123,22 @@ retention is then load-bearing, and the only honest advice is none.
         self._defer(
             stored,
             container,
-            f"`{container}.{method}(...)` stores a tensor that is still attached to the "
-            f"autograd graph; every iteration's graph is retained in VRAM.",
+            f"`{container}.{method}(...)`",
             "Use `.item()` to keep just the scalar value, or `.detach()` to keep the "
             "tensor without its graph.",
         )
         return True
 
     def visit_AugAssign(self, node: cst.AugAssign) -> bool:
+        target = dotted_name(node.target)
+        if target is not None:
+            self._note_flow(target, node.value)
+
         # ``total_loss += loss`` accumulates graphs just as surely as ``.append``.
         if not self.in_loop or self.in_no_grad:
             return True
         if not isinstance(node.operator, (cst.AddAssign, cst.SubtractAssign)):
             return True
-
-        target = dotted_name(node.target)
         if target is None or self.bound_in_innermost_loop(target):
             return True
         if not self.is_grad(node.value):
@@ -130,14 +147,22 @@ retention is then load-bearing, and the only honest advice is none.
         self._defer(
             node.value,
             target,
-            f"`{target} += ...` accumulates a graph-attached tensor across iterations, "
-            f"chaining every step's graph into one that is never freed.",
+            f"`{target} += ...`",
             "Accumulate the scalar instead: `{0} += loss.item()`.".format(target),
         )
         return True
 
     def visit_Assign(self, node: cst.Assign) -> bool:
-        # ``cache[key] = loss`` / ``self.buffer[i] = out``
+        for target in node.targets:
+            # ``x = expr`` and ``cache[k] = expr`` both mean the graph of ``expr`` is now
+            # reachable through the target, which is what reachability needs to follow.
+            holder = target.target
+            if isinstance(holder, cst.Subscript):
+                holder = holder.value
+            name = dotted_name(holder)
+            if name is not None:
+                self._note_flow(name, node.value)
+
         if self.in_no_grad or not self.is_grad(node.value):
             return True
 
@@ -150,59 +175,115 @@ retention is then load-bearing, and the only honest advice is none.
             self._defer(
                 node.value,
                 container,
-                f"`{container}[...] = ...` stores a graph-attached tensor in a container "
-                f"that outlives the loop iteration, retaining its graph in VRAM.",
+                f"`{container}[...] = ...`",
                 "Store `.item()` or `.detach()` instead.",
             )
             break
         return True
 
-    def visit_Return(self, node: cst.Return) -> bool:
-        # Handing a raw element out of the container gives the caller something we cannot
-        # follow. `return self._internal_losses[i]` is a getter for a deferred backward;
-        # `return loss` is not, so only subscript reads count here.
-        if node.value is not None:
-            self._note_escaping_reads(node.value)
+    def visit_For(self, node: cst.For) -> bool:
+        # A loop variable is an element of what it iterates, so `for l in self.losses:
+        # l.backward()` has to reach the container and not the throwaway name.
+        for name in target_names(node.target):
+            self._flows_from.setdefault(self._key(name), set()).update(
+                self._read_keys(node.iter)
+            )
         return True
+
+    def visit_Return(self, node: cst.Return) -> bool:
+        if node.value is not None:
+            self._return_seeds |= self._return_keys(node.value)
+        return True
+
+    def _return_keys(self, expr: cst.BaseExpression) -> Set[Key]:
+        """Names whose *graph* the caller is being handed.
+
+        A bare name says nothing. ``return losses`` hands back a container, and a caller is
+        as likely to read values out of it as to backward through it — so that on its own
+        must not excuse the retention, or the rule would fall silent on every helper that
+        collects and returns.
+
+        A value *computed* from the accumulation is different: ``return total_loss / n`` and
+        ``return self._internal_losses[i]`` are only meaningful with the graph attached, so
+        holding it is the point rather than an oversight.
+        """
+        if isinstance(expr, (cst.Tuple, cst.List)):
+            keys: Set[Key] = set()
+            for element in expr.elements:
+                keys |= self._return_keys(element.value)
+            return keys
+        if isinstance(expr, (cst.Name, cst.Attribute)) and dotted_name(expr) is not None:
+            return set()
+        return self._read_keys(expr)
 
     # ------------------------------------------------------------------ verdict
 
     def leave_Module(self, original_node: cst.Module) -> None:
+        load_bearing = self._reachable(self._backward_seeds | self._return_seeds)
+        already_backwarded = self._reachable(self._backward_seeds)
+
         for candidate in self._candidates:
-            if (candidate.scope, candidate.holder) in self._backward_fed:
+            if candidate.holder in load_bearing:
                 continue
+
+            # `backward()` frees the saved tensors as it traverses, so a tensor stored after
+            # its own backward retains graph nodes and no activations. Same fix, much smaller
+            # consequence, and claiming OOM for it would be false.
+            freed = bool(candidate.stored & already_backwarded)
+            if freed:
+                message = (
+                    f"{candidate.subject} keeps a graph-attached tensor whose backward has "
+                    f"already run. Its activations are freed, so what accumulates is the "
+                    f"graph nodes — host memory rather than VRAM, but still growing every "
+                    f"iteration, and the stored value stays silently differentiable."
+                )
+            else:
+                message = (
+                    f"{candidate.subject} keeps a tensor attached to the autograd graph and "
+                    f"nothing backwards it, so every activation on the way to it stays in "
+                    f"VRAM — one full graph per iteration, until the run OOMs."
+                )
+
             self.report(
                 candidate.node,
-                candidate.message,
+                message,
                 hint=candidate.hint,
+                severity=Severity.WARNING if freed else Severity.ERROR,
+                category=Category.PERFORMANCE_WARN if freed else Category.CRITICAL_OOM,
                 fix_build=lambda updated: attach_method(updated, "detach"),
                 fix_description="add .detach()",
             )
 
     # ------------------------------------------------------------------ helpers
 
-    def _defer(self, node: cst.CSTNode, holder: str, message: str, hint: str) -> None:
+    def _defer(self, node: cst.BaseExpression, holder: str, subject: str, hint: str) -> None:
         """Hold a finding until ``leave_Module``.
 
-        The exemption depends on code that may appear anywhere in the file — a getter
-        defined below the append, or a backward call in a sibling method — so the verdict
-        cannot be reached at the point of the write.
+        Both the exemption and the severity depend on code that may appear anywhere in the
+        file — a getter defined below the append, a backward in a sibling method — so
+        neither verdict can be reached at the point of the write.
         """
         self._candidates.append(
-            _Candidate(node, holder, self._holder_scope(holder), message, hint)
+            _Candidate(
+                node=node,
+                holder=self._key(holder),
+                stored=self._read_keys(node),
+                subject=subject,
+                hint=hint,
+            )
         )
 
-    def _holder_scope(self, holder: str) -> Optional[ScopePath]:
-        """Which scope a holder's identity is keyed to.
+    def _key(self, name: str) -> Key:
+        """Scope a name so file-level facts cannot leak between functions.
 
-        ``self.losses`` is instance state: appended in one method and backwarded in
-        another is the normal shape, so it matches file-wide. A bare local name matches
-        only within its own function — the file-wide leakage that has already bitten
-        ``models``, ``criteria``, ``uses_distributed`` and TG008.
+        ``self.losses`` is instance state: appended in one method and backwarded in another
+        is the normal shape, so it matches file-wide. A bare local matches only within its
+        own function — the leakage that has already bitten ``models``, ``criteria``,
+        ``uses_distributed`` and TG008.
         """
-        if holder.startswith("self."):
-            return None
-        return self._function_key()
+        if name.startswith("self."):
+            return (None, name)
+        return (self._function_key(), name)
 
     def _function_key(self) -> ScopePath:
         """Scope path down to the innermost enclosing function."""
@@ -211,6 +292,27 @@ retention is then load-bearing, and the only honest advice is none.
             if scope.kind == "function":
                 last = index
         return tuple(s.name for s in self.scopes[: last + 1])
+
+    def _note_flow(self, target: str, value: cst.BaseExpression) -> None:
+        self._flows_from.setdefault(self._key(target), set()).update(self._read_keys(value))
+
+    def _read_keys(self, node: cst.BaseExpression) -> Set[Key]:
+        return {self._key(name) for name in _reads(node)}
+
+    def _reachable(self, seeds: Set[Key]) -> Set[Key]:
+        """Everything the seeds' values were built from, transitively.
+
+        Flow-insensitive and within-scope, which is all the surrounding analysis claims.
+        ``loss = stack(losses).sum(); loss.backward()`` reaches ``losses`` in two hops.
+        """
+        seen = set(seeds)
+        stack = list(seeds)
+        while stack:
+            for source in self._flows_from.get(stack.pop(), ()):
+                if source not in seen:
+                    seen.add(source)
+                    stack.append(source)
+        return seen
 
     def _is_backward_call(self, node: cst.Call) -> bool:
         """A call that runs a backward pass over whatever it is given.
@@ -222,28 +324,6 @@ retention is then load-bearing, and the only honest advice is none.
         leaf = final_attr(node.func)
         return leaf is not None and "backward" in leaf
 
-    def _note_backward_feed(self, node: cst.BaseExpression) -> None:
-        """Record every holder read anywhere inside an expression fed to a backward pass.
-
-        The read can be arbitrarily deep: ``dist_autograd.backward(ctx, [res[i].sum()])``
-        reaches ``res`` through a list, a call and a subscript.
-        """
-        for name in _reads(node, subscripts_only=False):
-            self._mark_fed(name)
-
-    def _note_escaping_reads(self, node: cst.BaseExpression) -> None:
-        for name in _reads(node, subscripts_only=True):
-            self._mark_fed(name)
-
-    def _mark_fed(self, name: str) -> None:
-        self._backward_fed.add((self._holder_scope(name), name))
-        # A loop variable is an element of what it iterates, so `for l in self.losses:
-        # l.backward()` has to mark the container, not the throwaway name.
-        for frame in self.loops:
-            if name in frame.assigned and frame.iterable:
-                iterable = frame.iterable
-                self._backward_fed.add((self._holder_scope(iterable), iterable))
-
     def _container_accumulates(self, container: str) -> bool:
         """True if writes to ``container`` survive past the current loop iteration."""
         if self.in_loop:
@@ -254,22 +334,19 @@ retention is then load-bearing, and the only honest advice is none.
         return container.startswith("self.")
 
 
-def _reads(node: cst.CSTNode, *, subscripts_only: bool) -> List[str]:
+def _reads(node: cst.CSTNode) -> List[str]:
     """Dotted names read within an expression.
 
-    With ``subscripts_only``, only the base of a subscript is collected: ``losses[i]``
-    yields ``losses`` but a bare ``loss`` yields nothing. That distinction is what keeps
-    ``return loss`` (the Lightning leak, where the container is still write-only) apart
-    from ``return self._internal_losses[i]`` (a getter for a held graph).
+    A subscript contributes its base, so ``losses[i]`` reads ``losses`` — indexing a held
+    container is how a deferred backward gets at what it needs.
     """
-    collector = _ReadCollector(subscripts_only)
+    collector = _ReadCollector()
     node.visit(collector)
     return collector.names
 
 
 class _ReadCollector(cst.CSTVisitor):
-    def __init__(self, subscripts_only: bool) -> None:
-        self.subscripts_only = subscripts_only
+    def __init__(self) -> None:
         self.names: List[str] = []
 
     def visit_Subscript(self, node: cst.Subscript) -> bool:
@@ -279,17 +356,14 @@ class _ReadCollector(cst.CSTVisitor):
         return True
 
     def visit_Name(self, node: cst.Name) -> bool:
-        if not self.subscripts_only:
-            self.names.append(node.value)
+        self.names.append(node.value)
         return True
 
     def visit_Attribute(self, node: cst.Attribute) -> bool:
         name = dotted_name(node)
         if name is None:
             return True  # ``f().x`` -- descend, the reads are inside the call
-        if not self.subscripts_only:
-            self.names.append(name)
-        # A pure name path contains no further reads. Descending would collect its own
-        # segments, so ``self.losses`` in a backward call would also mark a local
-        # ``losses`` in some other function as load-bearing.
+        self.names.append(name)
+        # A pure name path holds no further reads. Descending would collect its own
+        # segments, so ``self.losses`` would also mark a local ``losses`` elsewhere.
         return False

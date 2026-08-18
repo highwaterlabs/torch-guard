@@ -42,8 +42,23 @@ Each is one file plus a `@register` decorator — the registry was built for thi
 - Cross-file resolution: today the provenance analysis stops at file boundaries. A model
   defined in `models.py` and trained in `train.py` is the common layout, and we currently
   lean on naming conventions to bridge it.
-- Flow sensitivity within a scope. Would remove the `is_explicitly_detached` discard hack in
-  `provenance.py` and let us handle reassignment properly.
+- **Within-file callee return types.** Cheaper than cross-file resolution and now known to
+  matter: `char_rnn_generation_tutorial.py` has `train()` return `loss.item() / n`, and the
+  caller's `total_loss += loss` is then flagged for accumulating a **float**. The callee's
+  `return` is a few lines away in the same file, so nothing has to be inferred — we simply
+  do not look. Six findings across `pytorch/tutorials` come from this alone. Tuple returns
+  need element-wise mapping (`output, loss = train(...)`), which is the only fiddly part.
+- **Flow sensitivity within a scope.** Would remove the `is_explicitly_detached` discard
+  hack in `provenance.py` and let us handle reassignment properly. The concrete case:
+  `transformers/examples/pytorch/language-modeling/run_clm_no_trainer.py` assigns
+  `outputs = model(**batch)` twice inside `main()` — line 637 in the training loop, line 665
+  inside `with torch.no_grad():`. Same scope, same name, so the flow-insensitive analysis
+  merges them and the eval-loop value inherits grad-ness from the training loop. Teaching
+  provenance that a `no_grad` assignment produces a detached value was necessary but not
+  sufficient; this is what stands between us and the standard Hugging Face eval loop.
+  Note the two candidate designs differ in cost: positions on every assignment would pay
+  `PositionProvider` on every file, which the dispatcher deliberately avoids, whereas
+  extending `ScopePath` to include enclosing statement blocks would not.
 - Confidence levels on diagnostics, so heuristic findings can be reported more quietly than
   structural ones.
 - Type inference from annotations when present — `def f(x: torch.Tensor)` is free signal we

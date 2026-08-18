@@ -2,6 +2,8 @@
 
 from conftest import analyze, codes
 
+from torch_preflight.diagnostics import Severity
+
 
 # --------------------------------------------------------------------- TG001
 
@@ -21,6 +23,13 @@ def test_tg001_flags_appending_attached_loss():
 
 
 def test_tg001_flags_augmented_accumulation():
+    """Accumulating after backward is a warning: the activations are already freed.
+
+    Measured by `tests/calibration/measure_retention.py`: on a 13x256 MLP, 560 KiB of
+    activations per iteration stay reachable when nothing backwards them and 0 KiB when
+    something does. Same fix either way, but only the first is the CUDA OOM the rule used to
+    claim for both.
+    """
     diagnostics = analyze(
         """
         def train(model, loader, criterion, optimizer):
@@ -33,7 +42,86 @@ def test_tg001_flags_augmented_accumulation():
         """
     )
     assert [d.code for d in diagnostics] == ["TG001"]
-    assert "accumulates a graph-attached tensor" in diagnostics[0].message
+    assert diagnostics[0].severity is Severity.WARNING
+    assert "whose backward has already run" in diagnostics[0].message
+
+
+def test_tg001_errors_when_nothing_backwards_the_stored_tensor():
+    """No backward, so the activations really are retained and the run really will OOM."""
+    diagnostics = analyze(
+        """
+        def train(model, loader, criterion, optimizer):
+            losses = []
+            for batch, y in loader:
+                loss = criterion(model(batch), y)
+                optimizer.zero_grad()
+                losses.append(loss)
+        """
+    )
+    assert [d.code for d in diagnostics] == ["TG001"]
+    assert diagnostics[0].severity is Severity.ERROR
+    assert "stays in VRAM" in diagnostics[0].message
+
+
+def test_tg001_returning_a_bare_container_is_not_evidence_of_a_deferred_backward():
+    """`return losses` must not excuse the retention.
+
+    A caller is as likely to read values out of a returned container as to backward through
+    it, and treating the bare return as proof would silence the rule on every helper that
+    collects and hands back. A value *computed* from the accumulation is different — that is
+    the chunked-loss shape, covered below.
+    """
+    assert "TG001" in codes(
+        """
+        def collect(model, loader, criterion):
+            losses = []
+            for batch, y in loader:
+                losses.append(criterion(model(batch), y))
+            return losses
+        """
+    )
+
+
+def test_tg001_quiet_when_an_accumulated_total_is_returned_for_backward():
+    """Reduced from `torchtune/modules/loss/kd_losses.py` and `cross_entropy_loss.py`.
+
+    A chunked loss module accumulates per-chunk losses and returns the total for the caller
+    to backward. Detaching would make the loss non-differentiable and the model would not
+    train at all.
+    """
+    assert codes(
+        """
+        def forward(self, student_logits, teacher_logits, labels, mask):
+            total_loss = 0.0
+            for student_chunk, label_chunk in zip(student_logits, labels):
+                total_loss += self.loss_fn(student_chunk, label_chunk)
+            return total_loss / torch.sum(mask.view(-1), dim=0)
+        """
+    ) == []
+
+
+def test_tg001_quiet_when_a_stacked_container_becomes_the_training_loss():
+    """Reduced from `examples/reinforcement_learning/actor_critic.py`.
+
+    `torch.stack(container).sum()` is a throwaway reduction when it is logged and
+    load-bearing when it becomes the loss. The two are written identically, so only
+    reachability separates them — see the logging case above, which still fires.
+    """
+    assert codes(
+        """
+        def finish_episode(model, optimizer, saved_actions, returns):
+            policy_losses = []
+            value_losses = []
+            for (log_prob, value), R in zip(saved_actions, returns):
+                advantage = R - value.item()
+                policy_losses.append(-log_prob * advantage)
+                value_losses.append(F.smooth_l1_loss(value, torch.tensor([R])))
+            optimizer.zero_grad()
+            loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
+            loss.backward()
+            optimizer.step()
+        """
+    ) == []
 
 
 def test_tg001_flags_dict_and_self_containers():
@@ -99,6 +187,30 @@ def test_tg001_quiet_inside_no_grad():
             with torch.no_grad():
                 for batch, y in loader:
                     outputs.append(model(batch))
+        """
+    ) == []
+
+
+def test_tg001_quiet_when_the_value_came_from_a_no_grad_forward():
+    """`with torch.no_grad():` around only the forward, which is the standard eval loop.
+
+    The append is outside the block, so a positional "am I inside no_grad" check misses it —
+    but the tensor has no `grad_fn` at all, because autograd was off when it was produced.
+    Reduced from `transformers/examples/pytorch/language-modeling/run_clm_no_trainer.py`.
+    """
+    assert codes(
+        """
+        import torch
+
+        def evaluate(model, eval_dataloader, accelerator, args):
+            model.eval()
+            losses = []
+            for step, batch in enumerate(eval_dataloader):
+                with torch.no_grad():
+                    outputs = model(**batch)
+
+                loss = outputs.loss
+                losses.append(accelerator.gather_for_metrics(loss.repeat(args.n)))
         """
     ) == []
 
@@ -499,6 +611,93 @@ def test_tg005_flags_softmax_layer_in_model():
 
         criterion = nn.CrossEntropyLoss()
         head = nn.Sequential(nn.Linear(8, 4), nn.Softmax(dim=1))
+        """
+    )
+
+
+def test_tg005_quiet_for_an_attention_softmax_submodule():
+    """Reduced from `pytorch/examples/gat/main.py`, where we fired wrongly.
+
+    `self.softmax = nn.Softmax(dim=1)` normalises attention coefficients over neighbours.
+    The model's output activation is `F.log_softmax`, which is exactly right for `NLLLoss`.
+    Attention softmax appears in every transformer and GNN, so merely constructing the layer
+    cannot be the evidence — final position in a `Sequential` can be.
+    """
+    assert codes(
+        """
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        class GraphAttentionLayer(nn.Module):
+            def __init__(self, n_heads):
+                super().__init__()
+                self.leakyrelu = nn.LeakyReLU(0.2)
+                self.softmax = nn.Softmax(dim=1)
+
+        class GAT(nn.Module):
+            def forward(self, x, adj):
+                return F.log_softmax(self.out_layer(x, adj), dim=1)
+
+        criterion = nn.NLLLoss()
+        """
+    ) == []
+
+
+def test_tg005_reads_the_layer_class_not_the_attribute_name():
+    """Reduced from `pytorch/tutorials/.../char_rnn_generation_tutorial.py`.
+
+    `self.softmax = nn.LogSoftmax(dim=1)` feeding `NLLLoss` is correct code — the attribute
+    is *named* softmax but bound to LogSoftmax. Trusting the name over the constructor two
+    lines away reported PyTorch's own tutorial as a convergence bug.
+    """
+    assert codes(
+        """
+        import torch.nn as nn
+
+        class RNN(nn.Module):
+            def __init__(self, hidden_size, output_size):
+                super().__init__()
+                self.o2o = nn.Linear(hidden_size, output_size)
+                self.softmax = nn.LogSoftmax(dim=1)
+
+            def forward(self, x, hidden):
+                output = self.o2o(x)
+                output = self.softmax(output)
+                return output, hidden
+
+        criterion = nn.NLLLoss()
+
+        def train(rnn, category_tensor, input_line_tensor, target_line_tensor):
+            output, hidden = rnn(category_tensor, input_line_tensor)
+            return criterion(output, target_line_tensor)
+        """
+    ) == []
+
+
+def test_tg005_still_flags_a_real_softmax_layer_reaching_nll_loss():
+    """The mirror of the two above: a real `nn.Softmax` does break `NLLLoss`, and the
+    resolution has to work in both directions — the attribute here is *named* softmax and
+    is bound to `nn.Softmax`, so it stays a finding.
+
+    Note the shape: the activation's result is bound to a name that then reaches the loss.
+    A model that returns `self.softmax(...)` straight out of `forward` is *not* caught, and
+    cannot be without resolving `forward` through the call site — see the gap recorded in
+    docs/rules.md.
+    """
+    assert "TG005" in codes(
+        """
+        import torch.nn as nn
+
+        class RNN(nn.Module):
+            def __init__(self, hidden_size, output_size):
+                super().__init__()
+                self.softmax = nn.Softmax(dim=1)
+
+        criterion = nn.NLLLoss()
+
+        def train(rnn, logits, target):
+            probs = rnn.softmax(logits)
+            return criterion(probs, target)
         """
     )
 
@@ -967,6 +1166,62 @@ def test_tg014_flags_accumulation_without_scaling():
 def test_tg014_silent_when_scaled_inline():
     assert "TG014" not in codes(
         ACCUMULATION_LOOP.format(backward="(loss / accumulation_steps).backward()")
+    )
+
+
+def test_tg014_silent_when_the_gradients_are_rescaled_instead():
+    """Reduced from `torchtune/recipes/full_finetune_single_device.py`.
+
+    Dividing the loss is the common compensation, not the only one. torchtune weights each
+    micro-batch loss by its token count and rescales the gradients by `1/num_tokens` before
+    stepping — a token-mean across micro-batches of unequal length, which is a *better*
+    normalisation than dividing by the step count. Telling them to divide as well would
+    shrink the gradient by the accumulation factor, so the false positive introduced a bug.
+    """
+    assert "TG014" not in codes(
+        """
+        def train(model, loader, optimizer, accumulation_steps, loss_fn, training):
+            num_tokens = 0
+            for i, (batch, y) in enumerate(loader):
+                current_num_tokens = (batch["labels"] != -100).sum()
+                num_tokens += current_num_tokens
+                loss = loss_fn(model(batch), y) * current_num_tokens
+                loss.backward()
+                if (i + 1) % accumulation_steps == 0:
+                    training.scale_grads_(model.parameters(), 1.0 / num_tokens)
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    num_tokens = 0
+        """
+    )
+
+
+def test_tg014_silent_when_the_rescaler_is_called_through_an_alias():
+    """Reduced from `torchtune/recipes/full_finetune_distributed.py`.
+
+    The recipe binds `self._grad_scaler = training.scale_grads_` (so it can wrap it in
+    `torch.compile`) and calls it through that name, which on its own says nothing. Reading
+    the binding rather than the call site is the same fix TG005 needed.
+    """
+    assert "TG014" not in codes(
+        """
+        class Recipe:
+            def setup(self, training, torch):
+                self._grad_scaler = training.scale_grads_
+                self._grad_scaler = torch.compile(self._grad_scaler)
+
+            def train(self, loader, optimizer, accumulation_steps, loss_fn):
+                num_tokens = 0
+                for i, (batch, y) in enumerate(loader):
+                    loss = loss_fn(self._model(batch), y)
+                    loss.backward()
+                    if (i + 1) % accumulation_steps == 0:
+                        self._grad_scaler(
+                            list(self._model.parameters()), self.world_size / num_tokens
+                        )
+                        optimizer.step()
+                        optimizer.zero_grad()
+        """
     )
 
 

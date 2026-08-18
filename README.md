@@ -98,24 +98,41 @@ architecture lookup; `torch-preflight[vram]` adds exact meta-device profiling.
 ## The line that costs you a GPU hour
 
 ```python
-losses = []
 for batch, targets in loader:
-    optimizer.zero_grad()
     loss = criterion(model(batch), targets)
-    loss.backward()
-    optimizer.step()
-    losses.append(loss)          # ← keeps every step's graph alive in VRAM
+    losses.append(loss)          # ← nothing backwards this: every activation stays in VRAM
 ```
 
 You have written this. Everyone has. `loss` still carries its computational graph, so
-appending it retains every intermediate activation from that step — and the next, and the
-next. Memory climbs linearly until CUDA gives up, hours in.
+appending it retains every intermediate activation on the way to it — and the next step's,
+and the next. Memory climbs linearly until CUDA gives up, hours in.
+
+**Where most tools would stop, and get it wrong.** Move one line and the same code costs
+almost nothing:
+
+```python
+for batch, targets in loader:
+    loss = criterion(model(batch), targets)
+    loss.backward()              # frees the saved tensors as it traverses
+    losses.append(loss)          # ← now retains graph *nodes*, not activations
+```
+
+`backward()` releases each node's saved tensors on its way through, so the second version
+holds host-side bookkeeping rather than VRAM. Measured on a 13×256 MLP
+([the harness is in the repo](https://github.com/highwaterlabs/torch-preflight/blob/main/tests/calibration/measure_retention.py)):
+**560 KiB of activations retained per iteration** in the first version, **0 KiB** in the
+second, with the same ~30 graph nodes held either way. Same one-line fix, two very different
+bugs — so torch-preflight reports the first as an error and the second as a warning, instead
+of claiming both will OOM your GPU.
 
 **Why this is hard:** `losses.append(x)` is only a bug when `x` carries a graph. torch-preflight
 runs a dataflow pass to find out, tracing values across assignments, arithmetic, tensor
 methods and function scopes, and refusing to propagate through `.detach()`, `.item()` or
 `argmax`. So `losses.append(loss.item())` stays silent, and so does anything inside
-`torch.no_grad()`. A linter that pattern-matched on `.append(` would be unusable.
+`torch.no_grad()`. It also tracks whether a backward pass still *needs* what you stored —
+pipeline-parallel schedules and chunked loss modules hold graphs on purpose, and telling them
+to `.detach()` would break the training run rather than speed it up. A linter that
+pattern-matched on `.append(` would be unusable.
 
 See [all 13 rules →](https://github.com/highwaterlabs/torch-preflight/blob/main/docs/rules.md)
 

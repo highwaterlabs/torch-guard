@@ -115,6 +115,7 @@ class Rule:
         fix_build: Optional[FixBuilder] = None,
         fix_description: str = "",
         severity: Optional[Severity] = None,
+        category: Optional[Category] = None,
     ) -> None:
         fix = None
         if fix_build is not None:
@@ -125,7 +126,7 @@ class Rule:
                 code=self.code,
                 message=message,
                 severity=severity or self.severity,
-                category=self.category,
+                category=category or self.category,
                 # Filled in after traversal, only if this file produced findings.
                 line=0,
                 column=0,

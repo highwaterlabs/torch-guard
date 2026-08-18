@@ -45,8 +45,8 @@ def train(model, dataset, val_dataset, device):
             loss.backward()          # TG003: nothing calls optimizer.zero_grad()
             optimizer.step()
 
-            losses.append(loss)      # TG001: keeps the whole graph alive
-            total_loss += loss       # TG001: chains every step's graph together
+            losses.append(loss)      # TG001: retains graph nodes (backward already ran)
+            total_loss += loss       # TG001: same, chained across every step
 
         # TG007: a sync per element instead of one reduction on the device
         for i in range(len(losses)):

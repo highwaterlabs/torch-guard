@@ -22,6 +22,19 @@ def train(model, loader, criterion, optimizer):
 """
 
 
+# TG001 reports the append-after-backward shape above as a warning, since backward has
+# already freed the activations. Reporter tests that assert on error severity need a shape
+# where nothing backwards the stored tensor and the activations really are retained.
+RETAINED = """
+def train(model, loader, criterion, optimizer):
+    losses = []
+    for batch, y in loader:
+        loss = criterion(model(batch), y)
+        optimizer.zero_grad()
+        losses.append(loss)
+"""
+
+
 # ----------------------------------------------------------------- suppression
 
 
@@ -158,7 +171,7 @@ def test_fail_on_threshold_ignores_warnings_by_default(tmp_path):
 
 
 def test_json_report_is_valid_and_complete():
-    source = textwrap.dedent(LEAKY.format(suffix=""))
+    source = textwrap.dedent(RETAINED)
     result = check_paths([], Config())
     diagnostics, _ = check_source("t.py", source)
     result.files.append(_FakeFile("t.py", diagnostics))
@@ -184,7 +197,7 @@ def test_sarif_report_is_valid():
 
 
 def test_github_annotations_escape_special_characters():
-    diagnostics, _ = check_source("t.py", textwrap.dedent(LEAKY.format(suffix="")))
+    diagnostics, _ = check_source("t.py", textwrap.dedent(RETAINED))
     result = check_paths([], Config())
     result.files.append(_FakeFile("t.py", diagnostics))
 

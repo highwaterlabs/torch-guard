@@ -112,6 +112,17 @@ class _Assignment:
     #: ``loss += f(x)`` rather than ``loss = f(x)``. The name-based heuristic does not
     #: apply to accumulators: whether they carry a graph depends on the right-hand side.
     augmented: bool = False
+    #: Assigned inside ``torch.no_grad()`` / ``inference_mode()``. The *value* has no
+    #: ``grad_fn``, whatever is done with it later — and the common idiom wraps only the
+    #: forward, then uses the result after the block::
+    #:
+    #:     with torch.no_grad():
+    #:         outputs = model(**batch)
+    #:     losses.append(outputs.loss)      # outside the block, but still detached
+    #:
+    #: A positional "am I inside a no-grad block" check misses that, which is what made
+    #: TG001 fire on the standard Hugging Face evaluation loop.
+    no_grad: bool = False
 
 
 @dataclass
@@ -420,7 +431,9 @@ class _Collector(ScopeTrackingVisitor):
         if not targets:
             return
         scope = self.scope_path
-        self.assignments.append(_Assignment(scope, targets, value, augmented))
+        self.assignments.append(
+            _Assignment(scope, targets, value, augmented, self.in_no_grad)
+        )
         self.prov.bindings.setdefault(scope, set()).update(targets)
 
         for name in targets:
@@ -504,7 +517,7 @@ def analyze(module: cst.Module) -> Provenance:
     for assignment in collector.assignments:
         if not isinstance(assignment.value, cst.Call) or assignment.augmented:
             continue
-        if prov.is_explicitly_detached(assignment.value):
+        if prov.is_explicitly_detached(assignment.value) or assignment.no_grad:
             continue
         for name in assignment.targets:
             if name.rsplit(".", 1)[-1] in LOSS_NAME_HINTS:
@@ -514,6 +527,9 @@ def analyze(module: cst.Module) -> Provenance:
     for _ in range(12):
         changed = False
         for assignment in collector.assignments:
+            # Autograd was off when this ran, so the value has no graph to propagate.
+            if assignment.no_grad:
+                continue
             if not prov.is_grad_bearing(assignment.value, assignment.scope):
                 continue
             for name in assignment.targets:
