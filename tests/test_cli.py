@@ -42,14 +42,53 @@ def test_path_shorthand_implies_check(tmp_path):
     assert main([str(write(tmp_path))]) == EXIT_FINDINGS
 
 
+# Appending *after* the backward: a TG001 warning. The activations are already freed, so it
+# is a real but bounded defect -- the RFC 0003 definition of `warning`.
+WARNING_SOURCE = textwrap.dedent(
+    """
+    def train(model, loader, criterion, optimizer):
+        losses = []
+        for batch, y in loader:
+            loss = criterion(model(batch), y)
+            optimizer.zero_grad()
+            loss.backward()
+            losses.append(loss)
+    """
+).lstrip("\n")
+
+# A `DataLoader` with unset `num_workers`: a TG004 note. Correct code, possibly untuned.
+NOTE_SOURCE = (
+    'import torch\nfrom torch.utils.data import DataLoader\n'
+    'device = torch.device("cuda")\nloader = DataLoader(ds)\n'
+)
+
+
 def test_warnings_do_not_fail_by_default(tmp_path):
-    source = (
-        'import torch\nfrom torch.utils.data import DataLoader\n'
-        'device = torch.device("cuda")\nloader = DataLoader(ds)\n'
-    )
-    target = write(tmp_path, "loader.py", source)
+    target = write(tmp_path, "warn.py", WARNING_SOURCE)
     assert main(["check", str(target)]) == EXIT_OK
     assert main(["check", str(target), "--fail-on", "warning"]) == EXIT_FINDINGS
+
+
+def test_notes_never_fail_even_at_the_warning_threshold(tmp_path):
+    """RFC 0003: notes report untuned code, not defective code, so they never gate.
+
+    This is what makes `fail_on = "warning"` usable. TG004 was 207 of the 318 findings
+    across seven real training repos; if it gated, anyone raising the threshold to catch a
+    retained graph would fail on tutorial `DataLoader` defaults instead, and turn the rule
+    off within a day.
+    """
+    target = write(tmp_path, "loader.py", NOTE_SOURCE)
+    assert main(["check", str(target)]) == EXIT_OK
+    assert main(["check", str(target), "--fail-on", "warning"]) == EXIT_OK
+
+
+def test_a_note_can_be_escalated_back_to_a_gate(tmp_path):
+    """The escape hatch for anyone whose priorities differ from our defaults."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.torch-preflight.severity]\nTG004 = "error"\n'
+    )
+    target = write(tmp_path, "loader.py", NOTE_SOURCE)
+    assert main(["check", str(target)]) == EXIT_FINDINGS
 
 
 def test_json_format(tmp_path, capsys):

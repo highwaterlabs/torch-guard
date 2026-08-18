@@ -457,7 +457,39 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       volume — tutorials keep it simple deliberately. Note `litgpt` came back **137 files, 0
       errors**, so careful code does scan clean.
 
-- [ ] **File the tensor-parallelism PR, and decide on TG004's default severity.** The torch
+- [ ] **File the tensor-parallelism PR.** Three one-line `zero_grad()` additions to
+      `pytorch/examples/distributed/tensor_parallelism/`.
+- [x] **Decided and implemented RFC 0003** — [what severity means, and what should fail a build](rfcs/0003-severity-and-ci-gating.md).
+      Written because the TG001 split stopped the classic `losses.append(loss)` from failing
+      CI by default. The measurement says the split is right: on a 4-layer transformer the
+      never-backwarded case retains **186 MiB/iteration** of activations and OOMs an 80 GB
+      A100 in ~440 steps, while the backwarded case retains **0** activations and ~15 KiB of
+      host bookkeeping — 1.4 GiB per 100k steps. Roughly 12,000x apart, and the gap widens
+      with model size.
+      The real finding is that `warning` is overloaded: it holds both that leak and TG004's
+      "you did not set `pin_memory`", which was **207 of the 318** findings in the seven-repo
+      scan. Proposal is to keep the split, move TG004 to `note`, keep `fail_on = error` as the
+      default while documenting `fail_on = warning` for training repos, and add per-rule
+      severity overrides. Breaking for anyone relying on TG001 to fail their build, so it
+      needs a minor version and a release note.
+      Two measurement mistakes are recorded in §2 because they nearly produced the opposite
+      answer: RSS alone spread 5.8-20.9 KiB/iteration across identical runs, and extrapolating
+      host cost from node counts predicted 280 KiB/iteration against a measured 12-16.
+
+      Shipped: TG004 is a `note`, the three levels are defined in `docs/rules.md` on one axis
+      (*what happens if you ship this*), and `fail_on = "warning"` is recommended in the README
+      and `docs/ci.md` for repos whose product is training runs. Open questions resolved in §7 —
+      TG007 and TG013 stay warnings because they name a specific defect rather than an unset
+      default; notes print but never gate, because hiding them trades a measured noise problem
+      for an unmeasurable trust one.
+      **Per-rule severity overrides already existed** — `Config.severity_overrides`, applied in
+      `engine.py`, with `TG004 = "note"` as the worked example in `docs/configuration.md`. The
+      RFC proposed building them before anyone checked; §4.4 records that.
+      Verified across the seven repos: 207 notes / 59 warnings / 32 errors, `fail_on=error`
+      fails 5 of 7 and `fail_on=warning` fails 6 of 7, with litgpt clean at both.
+      README's torch figures were stale and are corrected to **20 findings / 2,285 files** (the
+      TG001 fix removed three), along with "every one triaged as deliberate", which stopped
+      being true the moment three of them turned out to be ours. The torch
       scan is a poor source of PR-able findings and that is structural, not bad luck: 20 of
       the 23 are in `torch/testing/_internal`, where a deliberate `cuda.synchronize()` or a
       host-side factory in test setup costs nothing, and the framework itself contains no

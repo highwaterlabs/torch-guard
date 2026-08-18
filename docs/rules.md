@@ -5,7 +5,7 @@
 | **TG001** | error / warning | `CRITICAL_OOM` / `PERFORMANCE_WARN` | A tensor is stored (`losses.append(loss)`, `total += loss`, `cache[k] = out`) with its autograd graph still attached. Error when nothing backwards it, so the activations are retained; warning when backward has already freed them |
 | **TG002** | error | `CRITICAL_OOM` | Validation/inference runs a forward pass without `torch.no_grad()` / `inference_mode()` |
 | **TG003** | error | `CONVERGENCE_BUG` | `.backward()` runs in a loop with no `zero_grad()` anywhere in it |
-| **TG004** | warning | `PERFORMANCE_WARN` | `DataLoader` with `num_workers=0` or no `pin_memory` while the file targets CUDA |
+| **TG004** | note | `PERFORMANCE_WARN` | `DataLoader` with `num_workers=0` or no `pin_memory` while the file targets CUDA |
 | **TG005** | error | `CONVERGENCE_BUG` | `softmax` applied before `CrossEntropyLoss` (which applies `log_softmax` itself) |
 | **TG006** | error | `CONVERGENCE_BUG` | Binary cross-entropy paired with the wrong activation — `sigmoid` before `BCEWithLogitsLoss`, or raw logits into `BCELoss` |
 | **TG012** | error | `CONVERGENCE_BUG` | `DataLoader` under DDP with no `DistributedSampler` — every rank trains on identical batches |
@@ -15,6 +15,30 @@
 | **TG008** | warning | `CONVERGENCE_BUG` | A training run whose randomness is unseeded, or seeded for only some of torch / NumPy / `random` |
 | **TG013** | warning | `PERFORMANCE_WARN` | A host-to-device transfer repeated every iteration — loop-invariant data, a host factory, or the model itself |
 | **TG010** | error | `CRITICAL_OOM` | Projected peak VRAM exceeds the configured `target_gpu` — see [VRAM estimation](vram-estimation.md) |
+
+## What the levels mean
+
+One axis: *what happens if you ship this* ([RFC 0003](../design/rfcs/0003-severity-and-ci-gating.md)).
+
+| | meaning | gates a build? |
+|---|---|---|
+| **error** | The run produces a wrong result, or dies. Convergence bugs and OOM. | yes, by default |
+| **warning** | A real defect with a bounded blast radius. Never intentional, and the fix is unambiguous — it wastes memory or time rather than corrupting the result. | only under `fail_on = "warning"` |
+| **note** | A tuning observation. The code is correct; a different default would be faster on some hardware. | no |
+
+The test for warning versus note is **"is this code defective, or merely untuned?"**
+`losses.append(loss)` is defective — nobody wants the retention and `.detach()` costs nothing.
+`num_workers=0` is a choice, and often a deliberate one: it is the portable default, it is
+what tutorials use so they run under Windows spawn and in notebooks, and the right value
+depends on the host's core count.
+
+Notes are printed like anything else — the first run has to show you what it found — they
+just never decide the exit code. Any level can be overridden per rule; see
+[configuration](configuration.md).
+
+**If your repository's product is training runs, set `fail_on = "warning"`.** It catches the
+retained graphs, the per-element device syncs and the unseeded runs, and TG004 being a note is
+what keeps that setting usable.
 
 The numbering has gaps. TG009 is **deliberately not implemented**: in-place operations on
 tensors needed for backward already raise a precise error from PyTorch itself, naming the

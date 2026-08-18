@@ -19,7 +19,14 @@ class DataLoaderStarvation(Rule):
     code = "TG004"
     name = "dataloader-starvation"
     summary = "DataLoader configured to stall a CUDA device"
-    severity = Severity.WARNING
+    #: A `note`, not a warning: this is the one rule that reports *untuned* code rather
+    #: than *defective* code. `num_workers=0` is a deliberate choice as often as it is an
+    #: oversight — it is the portable default, it is what tutorials use so they run under
+    #: Windows spawn and in notebooks, and the right value depends on the host. Nothing here
+    #: is ever wrong, only slower on some hardware. See RFC 0003: it was 207 of the 318
+    #: findings across seven real training repos, so leaving it at `warning` made `fail_on =
+    #: "warning"` unusable and kept `warning` from meaning anything.
+    severity = Severity.NOTE
     category = Category.PERFORMANCE_WARN
     explanation = """
 With ``num_workers=0`` the DataLoader runs in the training process, so the GPU sits idle
