@@ -110,9 +110,9 @@ def test_explain_unknown_rule_suggests_closest_code(capsys):
 
 def test_explain_retired_rule(capsys):
     assert main(["explain", "TG009"]) == EXIT_OK
-    err = capsys.readouterr().err
-    assert "deliberately not implemented" in err
-    assert "unknown rule" not in err
+    out = capsys.readouterr().out
+    assert "deliberately not implemented" in out
+    assert "unknown rule" not in out
 
 
 def test_explain_unknown_rule_without_close_match(capsys):

@@ -188,29 +188,50 @@ def _print_diff(result) -> None:
 def _run_explain(code: str) -> int:
     normalized_code = code.upper()
     rule = RULES.get(normalized_code)
+
     if rule is None:
         retired_reason = RETIRED_RULES.get(normalized_code)
         if retired_reason:
-            print(f"torch-preflight: {retired_reason}", file=sys.stderr)
+            console = Console()
+            console.print(f"torch-preflight: {retired_reason}")
             return EXIT_OK
 
-        suggestion = difflib.get_close_matches(normalized_code, RULES, n=1)
-        if suggestion:
-            prefix_matches = [rule_code for rule_code in RULES if rule_code.startswith(normalized_code)]
-            if prefix_matches:
-                suggestion = [prefix_matches[0]]
+        # Prefer prefix matches first. This handles inputs like TG01,
+        # where the user likely started typing a real rule code.
+        prefix_matches = [
+            rule_code for rule_code in RULES if rule_code.startswith(normalized_code)
+        ]
+
+        if prefix_matches:
+            suggestion = prefix_matches[0]
+        else:
+            # Ask difflib for several candidates, then prefer the
+            # lowest-numbered rule when scores tie. This avoids cases
+            # like TG02 -> TG012 instead of TG002.
+            suggestions = difflib.get_close_matches(normalized_code, RULES, n=3)
+
+            if suggestions:
+                suggestion = min(
+                    suggestions,
+                    key=lambda rule_code: int(rule_code[2:]) if rule_code[2:].isdigit() else float('inf'),
+                )
+            else:
+                suggestion = None
+
         print(f"torch-preflight: unknown rule {code}", file=sys.stderr)
+
         if suggestion:
             print(
-                f"help: did you mean {suggestion[0]}? "
-                "Run `torch-preflight rules` to see all 13.",
+                f"help: did you mean {suggestion}? "
+                f"Run `torch-preflight rules` to see all {len(RULES)}.",
                 file=sys.stderr,
             )
         else:
             print(
-                "help: run `torch-preflight rules` to see all 13.",
+                f"help: run `torch-preflight rules` to see all {len(RULES)}.",
                 file=sys.stderr,
             )
+
         return EXIT_ERROR
 
     console = Console()
