@@ -128,6 +128,10 @@ class _Assignment:
     #: A positional "am I inside a no-grad block" check misses that, which is what made
     #: TG001 fire on the standard Hugging Face evaluation loop.
     no_grad: bool = False
+    #: Ordered names when the target is a plain tuple of names, so ``output, loss =
+    #: train(...)`` can be matched element-wise against the callee's ``return`` tuple.
+    #: ``targets`` is flattened and loses the positions.
+    unpacked: Tuple[str, ...] = ()
     #: Identities of the loops enclosing this assignment, outermost first. Used to tell two
     #: assignments to the same name apart when they live in sibling loops -- a training loop
     #: and an evaluation loop in one function, which is the shape that defeated `no_grad`.
@@ -444,6 +448,10 @@ class _Collector(ScopeTrackingVisitor):
         self.assignments: List[_Assignment] = []
         self.prov = Provenance()
         self.seeds: Set[Tuple[ScopePath, str]] = set()
+        #: ``function name -> [(scope it returns in, returned expression)]``. Enough to tell
+        #: a caller that ``train()`` hands back ``loss.item() / n`` -- a float -- rather than
+        #: guessing from the caller's variable being named ``loss``.
+        self.returns: Dict[str, List[Tuple[ScopePath, cst.BaseExpression]]] = {}
 
     # -- class definitions: which local classes are nn.Modules? ----------------
 
@@ -459,9 +467,18 @@ class _Collector(ScopeTrackingVisitor):
     def visit_Assign(self, node: cst.Assign) -> bool:
         self._pending_value = node.value
         targets: List[str] = []
+        unpacked: Tuple[str, ...] = ()
         for target in node.targets:
             targets.extend(target_names(target.target))
-        self._record(targets, node.value)
+            if isinstance(target.target, cst.Tuple):
+                names = [
+                    element.value.value
+                    for element in target.target.elements
+                    if isinstance(element.value, cst.Name)
+                ]
+                if len(names) == len(target.target.elements):
+                    unpacked = tuple(names)
+        self._record(targets, node.value, unpacked=unpacked)
         return True
 
     def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
@@ -481,14 +498,20 @@ class _Collector(ScopeTrackingVisitor):
     _pending_value: Optional[cst.BaseExpression] = None
 
     def _record(
-        self, targets: List[str], value: cst.BaseExpression, augmented: bool = False
+        self,
+        targets: List[str],
+        value: cst.BaseExpression,
+        augmented: bool = False,
+        unpacked: Tuple[str, ...] = (),
     ) -> None:
         if not targets:
             return
         scope = self.scope_path
         loops = tuple(id(frame.node) for frame in self.loops)
         self.assignments.append(
-            _Assignment(scope, targets, value, augmented, self.in_no_grad, loops)
+            _Assignment(
+                scope, targets, value, augmented, self.in_no_grad, unpacked, loops
+            )
         )
         if self.in_no_grad and loops:
             for name in targets:
@@ -533,6 +556,16 @@ class _Collector(ScopeTrackingVisitor):
         if leaf and leaf.endswith("Loss"):
             return leaf
         return None
+
+    # -- return expressions, so a caller can be told what a local helper hands back
+
+    def visit_Return(self, node: cst.Return) -> bool:
+        function = self.current_function
+        if function is not None and node.value is not None:
+            self.returns.setdefault(function.name, []).append(
+                (self.scope_path, node.value)
+            )
+        return True
 
     # -- seeds: anything ``.backward()`` is called on is definitively grad-bearing
 
@@ -599,6 +632,65 @@ def _reads_detached_name(
     return probe.found
 
 
+def _contains_detaching_call(tree: cst.CSTNode) -> bool:
+    """Does this expression visibly sever the graph anywhere inside it?
+
+    Positive evidence, deliberately. `#46` established that "we could not prove it carries a
+    graph" must never be read as "it does not" -- that silenced a real leak even when
+    ``loss.backward()`` was called on the name. So a callee's return only counts as detached
+    when a ``.item()`` / ``.detach()`` / ``float(...)`` is actually visible in it.
+    """
+
+    class _Probe(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.found = False
+
+        def visit_Call(self, node: cst.Call) -> bool:
+            func = node.func
+            if isinstance(func, cst.Attribute) and func.attr.value in DETACHING_METHODS:
+                self.found = True
+            elif isinstance(func, cst.Name) and func.value in DETACHING_BUILTINS:
+                self.found = True
+            return True
+
+    probe = _Probe()
+    tree.visit(probe)
+    return probe.found
+
+
+def _resolved_returns(
+    collector: "_Collector", assignment: _Assignment
+) -> List[Tuple[str, ScopePath, cst.BaseExpression]]:
+    """What a local helper hands back, matched to the names it is assigned to.
+
+    ``output, loss = train(...)`` against ``return output, loss.item() / n`` maps ``loss`` to
+    the second element. The flattened ``targets`` list cannot express that, which is why the
+    positional names are kept separately.
+
+    Only bare-name calls to functions defined in this file are resolved; anything imported,
+    dotted or shadowed is left alone.
+    """
+    value = assignment.value
+    if not isinstance(value, cst.Call) or not isinstance(value.func, cst.Name):
+        return []
+    returns = collector.returns.get(value.func.value)
+    if not returns or len(returns) != 1:
+        return []  # one unambiguous return only; branching returns are not worth guessing at
+
+    scope, expression = returns[0]
+    if assignment.unpacked and isinstance(expression, cst.Tuple):
+        elements = [e.value for e in expression.elements]
+        if len(elements) != len(assignment.unpacked):
+            return []
+        return [
+            (name, scope, element)
+            for name, element in zip(assignment.unpacked, elements)
+        ]
+    if len(assignment.targets) == 1 and not isinstance(expression, cst.Tuple):
+        return [(assignment.targets[0], scope, expression)]
+    return []
+
+
 def analyze(module: cst.Module) -> Provenance:
     """Run the two-phase provenance analysis over a parsed module."""
     collector = _Collector()
@@ -618,6 +710,25 @@ def analyze(module: cst.Module) -> Provenance:
         for name in assignment.targets:
             if name.rsplit(".", 1)[-1] in LOSS_NAME_HINTS:
                 prov.grad.add((assignment.scope, name))
+
+    # A local helper that visibly detaches what it returns settles what its caller holds.
+    # `char_rnn_generation_tutorial.py` has `train()` return `loss.item() / n`, so the
+    # caller's `total_loss += loss` accumulates a float -- but the caller's variable is
+    # named `loss`, and the name hint is the strongest heuristic here, so without reading
+    # the callee it wins and reports a retained graph.
+    #
+    # This has to run *before* the fixpoint. Discarding afterwards is too late: the fixpoint
+    # will already have carried the name into everything derived from it, and removing the
+    # source does not retract what it fed.
+    visibly_detached: Set[Tuple[ScopePath, str]] = set()
+    for assignment in collector.assignments:
+        for name, callee_scope, expression in _resolved_returns(collector, assignment):
+            if not _contains_detaching_call(expression):
+                continue
+            if prov.is_grad_bearing(expression, callee_scope):
+                continue
+            visibly_detached.add((assignment.scope, name))
+    prov.grad -= visibly_detached
 
     # Fixpoint over assignment edges.
     for _ in range(12):
@@ -647,6 +758,8 @@ def analyze(module: cst.Module) -> Provenance:
                 continue
             for name in assignment.targets:
                 key = (assignment.scope, name)
+                if key in visibly_detached:
+                    continue  # the callee's own return says otherwise
                 if key not in prov.grad:
                     prov.grad.add(key)
                     changed = True
