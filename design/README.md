@@ -15,7 +15,10 @@ free/paid boundary, which is itself on the private side of it.
 | [IDEAS.md](IDEAS.md) | Unfiltered parking lot. No commitment implied. | Grows freely; promote to TODO or RFC when real |
 | [rfcs/](rfcs/) | Designs big enough to need agreement *before* code exists | Permanent record, superseded not deleted |
 | — [0001](rfcs/0001-vram-estimator.md) | Pre-flight VRAM estimation | Implemented |
+| — [0003](rfcs/0003-severity-and-ci-gating.md) | What severity means, and what should fail a build | Implemented |
 | [spikes/](spikes/) | Time-boxed experiments answering one uncertain question | Permanent record of what we learned |
+| — [0001](spikes/0001-meta-device-activation-capture.md) | Measuring activations on a device that allocates nothing | Complete |
+| — [0002](spikes/0002-scanning-real-training-repos.md) | Pointing the tool at real training code | Complete |
 
 Measurement scripts live in [`tests/calibration/`](../tests/calibration/), not here — they
 are public tooling, since the calibration numbers are only credible if anyone can
