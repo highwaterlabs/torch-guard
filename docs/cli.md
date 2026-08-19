@@ -13,7 +13,20 @@ torch-preflight explain TG003             # full write-up for one rule
 
 `torch-preflight ./src` is shorthand for `torch-preflight check ./src`.
 
+**Speed.** PyTorch's own source — 2285 files — takes about 50 seconds on an 8-core laptop.
+Checking runs across processes by default; `--jobs 1` disables that, and `--fix` always
+runs sequentially.
+
+**Exit codes:** `0` clean · `1` findings at or above `--fail-on` (default `error`, so
+performance warnings do not break CI) · `2` bad invocation.
+
 ## Commands
+
+### Global options
+
+| Flag | Argument | Default | Description |
+|---|---|---|---|
+| `--version` | — | — | Show the installed torch-preflight version and exit |
 
 ### `check`
 
@@ -25,15 +38,15 @@ Analyze files or directories for PyTorch anti-patterns.
 | `-f`, `--format` | `terminal`, `json`, `github`, `sarif` | `terminal` | Output format |
 | `--fix` | — | `false` | Apply autofixes in place |
 | `--diff` | — | `false` | Show what `--fix` would change without writing |
-| `--select` | rule code | none | Only run these rules |
-| `--ignore` | rule code | none | Skip these rules |
+| `--select` | rule codes | none | Only run these rules; comma-separated values are supported |
+| `--ignore` | rule codes | none | Skip these rules; comma-separated values are supported |
 | `--exclude` | path pattern | none | Skip paths matching the pattern |
 | `--fail-on` | severity | `error` | Minimum severity that makes the run fail |
 | `-j`, `--jobs` | number | CPU count | Number of worker processes; `1` disables parallelism |
 | `--target-gpu` | GPU | none | Target GPU for the TG010 projected-OOM gate |
 | `--config` | path | none | Path to a config file |
 | `--no-color` | — | `false` | Disable coloured output |
-| `-q`, `--quiet` | — | `false` | Only print the summary |
+| `-q`, `--quiet` | — | `false` | Suppress source snippets in findings |
 
 ### `explain`
 
@@ -55,7 +68,7 @@ Project peak VRAM for a training script before you launch it.
 
 | Flag | Argument | Default | Description |
 |---|---|---|---|
-| `path` | training script | none | Training script to read the config from |
+| `path` | training script | required* | Training script to read the config from |
 | `--gpu` | GPU or cloud instance | none | Target GPU or cloud instance |
 | `--gpu-memory` | capacity | none | Explicit capacity for unlisted hardware, e.g. `48GiB` |
 | `--model` | model name or entry point | none | Architecture name or entry point |
@@ -72,7 +85,7 @@ Project peak VRAM for a training script before you launch it.
 | `--checkpointing` | — | `false` | Assume gradient checkpointing is on |
 | `--flash` | — | `false` | Assume Flash Attention / SDPA is on |
 | `--inference` | — | `false` | Inference only, with no backward pass |
-| `--generate` | — | `false` | Assume autoregressive decoding with a KV cache |
+| `--generate` | — | `false` | Assume autoregressive decoding with a KV cache; implies inference mode |
 | `--max-context` | number | none | Total tokens the KV cache must hold |
 | `-f`, `--format` | `terminal`, `json` | `terminal` | Output format |
 
@@ -83,13 +96,6 @@ List known GPUs and cloud instances.
 | Flag | Argument | Default | Description |
 |---|---|---|---|
 | `--instances` | — | `false` | Show cloud instances too |
-
-**Speed.** PyTorch's own source — 2285 files — takes about 50 seconds on an 8-core laptop.
-Checking runs across processes by default; `--jobs 1` disables that, and `--fix` always
-runs sequentially.
-
-**Exit codes:** `0` clean · `1` findings at or above `--fail-on` (default `error`, so
-performance warnings do not break CI) · `2` bad invocation.
 
 ## Autofixes
 
