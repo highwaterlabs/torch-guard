@@ -215,6 +215,63 @@ def test_tg001_quiet_when_the_value_came_from_a_no_grad_forward():
     ) == []
 
 
+def test_tg001_reads_what_a_local_helper_actually_returns():
+    """Reduced from `pytorch/tutorials/.../char_rnn_generation_tutorial.py`.
+
+    `train()` calls `.item()` internally and hands back a float, so the caller's
+    `total_loss += loss` accumulates a number. We flagged it because the caller's variable is
+    named `loss` and the name hint is the strongest heuristic in the analysis — it wins
+    unless something reads the callee, whose `return` is a few lines away in the same file.
+
+    Note the tuple: `output, loss = train(...)` has to be matched element-wise against
+    `return output, loss.item() / n`, which the flattened target list cannot express.
+    """
+    assert codes(
+        """
+        def train(rnn, criterion, category_tensor, input_line_tensor, target_line_tensor):
+            loss = 0
+            hidden = rnn.initHidden()
+            for i in range(input_line_tensor.size(0)):
+                output, hidden = rnn(category_tensor, input_line_tensor[i], hidden)
+                loss += criterion(output, target_line_tensor[i])
+            loss.backward()
+            return output, loss.item() / input_line_tensor.size(0)
+
+        total_loss = 0
+        all_losses = []
+        for iter in range(1, 100):
+            output, loss = train(rnn, criterion, *randomTrainingExample())
+            total_loss += loss
+            if iter % 10 == 0:
+                all_losses.append(total_loss / 10)
+                total_loss = 0
+        """
+    ) == []
+
+
+def test_tg001_still_fires_when_the_helper_returns_a_live_tensor():
+    """The guard for the above: resolving the callee must not become a blanket excuse.
+
+    The helper hands back `criterion(model(batch), y)` with nothing detaching it, so the
+    caller really is retaining a graph. Only a *visible* detach in the return counts —
+    per #46, "we could not prove it carries a graph" is not evidence that it does not.
+    """
+    assert "TG001" in codes(
+        """
+        def compute(model, batch, y, criterion):
+            return criterion(model(batch), y)
+
+        def run(model, loader, criterion, optimizer):
+            losses = []
+            for batch, y in loader:
+                loss = compute(model, batch, y, criterion)
+                optimizer.zero_grad()
+                losses.append(loss)
+            return losses
+        """
+    )
+
+
 def test_tg001_absence_of_proof_is_not_evidence_of_detachment():
     """Guards a regression the rest of the suite could not see.
 

@@ -51,12 +51,18 @@ Each is one file plus a `@register` decorator — the registry was built for thi
 - Cross-file resolution: today the provenance analysis stops at file boundaries. A model
   defined in `models.py` and trained in `train.py` is the common layout, and we currently
   lean on naming conventions to bridge it.
-- **Within-file callee return types.** Cheaper than cross-file resolution and now known to
-  matter: `char_rnn_generation_tutorial.py` has `train()` return `loss.item() / n`, and the
-  caller's `total_loss += loss` is then flagged for accumulating a **float**. The callee's
-  `return` is a few lines away in the same file, so nothing has to be inferred — we simply
-  do not look. Six findings across `pytorch/tutorials` come from this alone. Tuple returns
-  need element-wise mapping (`output, loss = train(...)`), which is the only fiddly part.
+- **Element types for containers.** The one `pytorch/tutorials` finding that within-file
+  return resolution does not clear: `chatbot_tutorial.py`'s `train()` returns
+  `sum(print_losses) / n_totals`, and the detach is a hop deeper, inside the elements
+  (`print_losses.append(mask_loss.item() * nTotal)`). Resolving it means knowing what a list
+  holds, not just what an expression evaluates to. Worth doing only if the shape shows up
+  again — one finding is not yet a pattern.
+- ~~**Within-file callee return types.**~~ Done. Five of the six `pytorch/tutorials`
+  findings; the sixth needs container element types, above. Resolves bare-name calls to
+  functions with a single unambiguous return, mapping tuple returns element-wise against
+  tuple targets, and only when the return contains a *visible* detaching call — evidence,
+  not absence of it. Runs before the fixpoint, since discarding a name afterwards does not
+  retract what it already fed.
 - **Flow sensitivity within a scope.** Would remove the `is_explicitly_detached` discard
   hack in `provenance.py` and let us handle reassignment properly. The concrete case:
   `transformers/examples/pytorch/language-modeling/run_clm_no_trainer.py` assigns
