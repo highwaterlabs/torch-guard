@@ -192,7 +192,7 @@ errors, before and after — so none of this was "the tool fires everywhere".
 
 ## 7. Still open
 
-- **TG008 (31 findings)** should be *split*, not demoted. No seeding at all is a choice we often
+- ~~**TG008 (31 findings)** should be *split*, not demoted.~~ Done. No seeding at all is a choice we often
   cannot see, since seeding frequently lives in the launcher rather than the script — that is a
   `note`. **Partial** seeding, torch seeded and NumPy not, is a defect whose intent is visible in
   the code, and stays a `warning`. On this corpus that is 30 notes and 1 warning, and the one
