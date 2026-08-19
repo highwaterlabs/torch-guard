@@ -139,6 +139,15 @@ Wrap the loop in ``with torch.no_grad():``, or decorate the routine with
             return True
 
         from_eval_loop = any(_looks_like_eval_loader(f.iterable) for f in self.loops)
+        # ...unless that very loop does the backward pass. `fgsm_tutorial.py` iterates
+        # `test_loader` and backwards through it on purpose, because an adversarial attack
+        # needs gradients with respect to the input. Reporting it said the function "never
+        # calls `.backward()`" while the call sat nine lines below.
+        if from_eval_loop and any(
+            _looks_like_eval_loader(f.iterable) and contains_call_to(f.node, ["backward"])
+            for f in self.loops
+        ):
+            from_eval_loop = False
         if unit.eval_name or unit.in_eval_mode or from_eval_loop:
             unit.candidates.append((node, from_eval_loop))
         return True

@@ -547,6 +547,46 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       in, both are reflexes rather than decisions — the repo setting for auto-deleting head
       branches would remove one of them permanently.
 
+- [x] **Re-triaged every finding, warnings and notes included — and the worst rule was a
+      warning.** 283 findings across the seven repos, read rather than clustered.
+      - **TG007 was 6/6 false, and each one was the rule reporting its own advice.** Every
+        finding was `correct += (predicted == labels).sum().item()` in a validation loop
+        nested in a training loop, which is *verbatim* what its hint tells you to write. The
+        batch-loop exemption matched iterable **names** (`loader`, `dataloader`, `batches`)
+        and missed `dev_iter` and `valloader`. Fixed by requiring evidence of per-element
+        iteration — a loop over `range(...)` — rather than lengthening the name list.
+      - **TG002 said `test()` "never calls `.backward()`" while the call sat nine lines
+        below.** `fgsm_tutorial.py` iterates `test_loader` and backwards through it on
+        purpose, because an adversarial attack needs gradients w.r.t. the input. A carve-out
+        meant for functions that both train and validate now checks the backward is not in
+        *this* loop.
+      - **TG001's bare-name return rule was too blunt.** `return logps` where
+        `logps = torch.cat(all_logps)` is not the container being handed back; it is a
+        reduction of it. A returned bare name now counts unless it is itself a holder.
+        6 findings across `trl` and torchtune.
+
+      14 removed, no new findings. Errors 21 -> 13, warnings 55 -> 49.
+
+      **Reading the warnings and notes is what found the worst of it.** Errors had been
+      re-read three times across this work; TG007 had never been looked at since it shipped,
+      because it never produced an error. Worth making the next scan read every level.
+
+      Still true and left alone: the 8 torchtune `running_loss += current_loss` warnings, and
+      TG003 x3, already fixed upstream in pytorch/examples#1424. **TG004 verified accurate** —
+      a sample of the 207 notes were all genuine `DataLoader` calls missing `num_workers` or
+      `pin_memory`; the problem was only volume, which making it a note already solved.
+
+- [ ] **Finish triaging TG013 (10).** Mixed shapes, needs individual reads rather than
+      clustering — the only rule not carried to a verdict in this pass.
+- [ ] **Decide whether TG008 should be a note.** 31 findings, factually right, but most are
+      synthetic-data example scripts where seeding changes nothing observable. Same
+      "true but not actionable" profile that moved TG004 under RFC 0003, so it deserves the
+      same test: is this code defective, or merely untuned?
+- [ ] **Two known false-positive causes remain unfixed**, both surfacing in TG002: non-model
+      callables read as forward passes (`tokenizer(...)`, `feature_extractor(...)`), and
+      deliberate gradient use for attribution (`captumyt.py`). Also still open, from TG001:
+      the `label` naming heuristic on non-tensor lists, and container element types.
+
 ## Cross-cutting
 
 - [x] Name and org settled: package `torch-preflight`, org `highwaterlabs`, deliberately
