@@ -215,6 +215,93 @@ def test_tg001_quiet_when_the_value_came_from_a_no_grad_forward():
     ) == []
 
 
+def test_tg001_absence_of_proof_is_not_evidence_of_detachment():
+    """Guards a regression the rest of the suite could not see.
+
+    Loop-scoped detachment first marked a name detached whenever its binding was not
+    *provably* grad-bearing in that loop. That silenced both cases below — the second even
+    though `loss.backward()` is definitive proof the tensor carries a graph.
+
+    The suite missed it because every other TG001 fixture assigns from something we can
+    resolve (`criterion(model(batch), y)`), and a seven-repo scan could not see it either:
+    a true positive that stops firing is indistinguishable from a false positive that got
+    fixed. Detachment now needs positive evidence, and these two exist so it stays that way.
+    """
+    unresolved = """
+        def train(model, loader, optimizer):
+            losses = []
+            for batch, y in loader:
+                loss = compute_loss(model, batch, y)
+                optimizer.zero_grad()
+                losses.append(loss)
+    """
+    assert "TG001" in codes(unresolved)
+
+    backwarded = """
+        def train(model, loader, optimizer):
+            losses = []
+            for batch, y in loader:
+                loss = compute_loss(model, batch, y)
+                optimizer.zero_grad()
+                loss.backward()
+                losses.append(loss)
+    """
+    assert "TG001" in codes(backwarded)
+
+
+def test_tg001_quiet_on_the_standard_accelerate_evaluation_loop():
+    """The whole shape, reduced from `transformers/examples/pytorch/.../run_clm_no_trainer.py`.
+
+    One function trains and then evaluates, binding `outputs` and `loss` in both loops. Two
+    separate things had to be right for this to go quiet:
+
+    * `no_grad` detachment is scoped to the loop it happened in, so the evaluation loop's
+      `outputs` is not rescued into grad-ness by the training loop that binds the same name
+      a few lines above. Python has function scope, not block scope, so this cannot simply
+      shadow.
+    * `accelerator.backward(loss)` seeds its *argument*, not its receiver. Seeding the
+      receiver made `accelerator` itself read as a live tensor, so every later
+      `accelerator.gather_for_metrics(...)` looked grad-bearing regardless.
+    """
+    assert codes(
+        """
+        import torch
+
+        def main(model, train_dataloader, eval_dataloader, optimizer, accelerator, args):
+            for step, batch in enumerate(train_dataloader):
+                outputs = model(**batch)
+                loss = outputs.loss
+                accelerator.backward(loss)
+                optimizer.step()
+                optimizer.zero_grad()
+
+            losses = []
+            for step, batch in enumerate(eval_dataloader):
+                with torch.no_grad():
+                    outputs = model(**batch)
+                loss = outputs.loss
+                losses.append(accelerator.gather_for_metrics(loss.repeat(args.n)))
+        """
+    ) == []
+
+
+def test_tg001_accelerator_backward_still_marks_its_argument():
+    """The mirror: the fix must not stop `accelerator.backward(loss)` marking `loss`."""
+    diagnostics = analyze(
+        """
+        def train(model, loader, criterion, optimizer, accelerator):
+            losses = []
+            for batch, y in loader:
+                loss = criterion(model(batch), y)
+                accelerator.backward(loss)
+                optimizer.step()
+                optimizer.zero_grad()
+                losses.append(loss)
+        """
+    )
+    assert [d.code for d in diagnostics] == ["TG001"]
+
+
 def test_tg001_quiet_when_a_getter_hands_the_element_to_a_deferred_backward():
     """Reduced from ``torch/distributed/pipelining/schedules.py``, where we fired wrongly.
 

@@ -103,7 +103,8 @@ class Rule:
         return self.ctx.provenance
 
     def is_grad(self, node: cst.BaseExpression) -> bool:
-        return self.prov.is_grad_bearing(node, self.scope_path)
+        loops = [id(frame.node) for frame in self.loops]
+        return self.prov.is_grad_bearing(node, self.scope_path, loops)
 
     def report(
         self,
