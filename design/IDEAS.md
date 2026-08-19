@@ -31,6 +31,15 @@ Each is one file plus a `@register` decorator — the registry was built for thi
   promised, but every rule independently recomputes `dotted_name(node.func)` and
   `final_attr(node.func)` on the same nodes. Caching those on the dispatcher, keyed by node
   identity, should flatten most of the per-rule cost without touching any rule.
+- **Run the documented pre-commit config, the way `action-smoke.yml` runs the documented
+  Action.** The `rev:` pins in the README and `docs/ci.md` had drifted to `v0.1.0` and `v0.2.0`
+  and nobody noticed, which is the third instance of one pattern: instructions we publish and
+  never execute. The first was `uses: highwaterlabs/torch-preflight@v0` resolving to nothing;
+  the second was `action.yml` missing the Node 20 pin bump that every workflow file got. A job
+  that installs pre-commit, runs the hook exactly as documented against a known-bad file and
+  asserts a non-zero exit would close the whole class rather than the instance. The pins would
+  still need bumping at release, but a stale one would fail loudly instead of silently.
+
 - **A scoped-fact helper.** Five separate rules have now hit a bug where a file-level fact
   leaked across functions — `prov.models`, `prov.criteria`, `uses_distributed`, TG008's "does
   this file train", and TG001's deferred-backward exemption. Each was fixed the same way:

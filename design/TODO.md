@@ -457,8 +457,16 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       volume — tutorials keep it simple deliberately. Note `litgpt` came back **137 files, 0
       errors**, so careful code does scan clean.
 
-- [ ] **File the tensor-parallelism PR.** Three one-line `zero_grad()` additions to
-      `pytorch/examples/distributed/tensor_parallelism/`.
+- [x] **Filed the tensor-parallelism PR** — [pytorch/examples#1424](https://github.com/pytorch/examples/pull/1424).
+      Three one-line `zero_grad()` additions, placed after `optimizer.step()` to match the
+      sibling `distributed/FSDP2/example.py` rather than the `mnist` convention of putting it
+      before the forward. Re-verified against live `main` first, since the clone was a day old.
+      Deliberately left out a second finding in the same directory: `sequence_parallel_example.py`
+      has no `manual_seed` where its two siblings do, but its own comment says "input can be
+      different across all ranks", so it reads as intentional — and bundling it would have given
+      a reviewer something to argue about. One finding, one PR. The tool is credited in a single
+      line at the bottom rather than the top.
+      **The single upstream-reportable result from 318 findings across 1,615 files.**
 - [x] **Decided and implemented RFC 0003** — [what severity means, and what should fail a build](rfcs/0003-severity-and-ci-gating.md).
       Written because the TG001 split stopped the classic `losses.append(loss)` from failing
       CI by default. The measurement says the split is right: on a 4-layer transformer the
@@ -501,6 +509,43 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       Every finding gets read by hand before anything is filed. The base rate says why:
       TG013 went 57 -> 14 -> 8 on this codebase, and the pipelining case above would have
       been a rejected PR in `pytorch/pytorch` arguing against a design we had not understood.
+
+- [x] **0.4.0 released**, and the Marketplace listing republished from it. The changelog leads
+      with a breaking-change block rather than burying it under "Changed", because the TG001
+      downgrade and TG004 becoming a note both mean a previously-red build goes green. Verified
+      from the published wheel rather than the working tree: fresh venv, 11 packages, no torch,
+      and the classic `losses.append(loss)` exiting 0 by default and 1 under `--fail-on warning`.
+      Also caught while bumping: the documented pre-commit `rev:` pins had drifted to `v0.1.0`
+      in `docs/ci.md` and `v0.2.0` in the README. Same class as the `@v0` tag that did not
+      resolve — instructions we publish but never execute. A test that runs the documented
+      pre-commit config the way `action-smoke.yml` runs the documented Action would close the
+      whole class; filed as an idea rather than done.
+
+- [x] **The standard Accelerate evaluation loop no longer reports a TG001 error**
+      ([#46](https://github.com/highwaterlabs/torch-preflight/pull/46)). Two causes:
+      `accelerator.backward(loss)` seeded `accelerator` itself as a live tensor, because the
+      collector seeds whatever `.backward()` is called on and Accelerate inverts that shape;
+      and a single `main()` binding `outputs` in both a training and an evaluation loop shared
+      one key, so the detached binding inherited grad-ness from its sibling. Bindings now carry
+      their enclosing loop identities. Python has function scope rather than block scope, so
+      this says "detached *within this loop*" rather than shadowing the name outright.
+
+      **The part worth remembering is the bug I put in on the way.** Detachment first
+      propagated whenever a binding was not *provably* grad-bearing — absence of proof treated
+      as evidence. That silenced `loss = compute_loss(...)` followed by `losses.append(loss)`,
+      and silenced it even when `loss.backward()` was called on the name.
+
+      Neither check caught it. All 437 tests passed, because every TG001 fixture assigns from
+      something resolvable like `criterion(model(batch), y)`. And the seven-repo scan reported
+      **zero new findings**, which is structurally blind here: a true positive that stops firing
+      is indistinguishable from a false positive that got fixed. I had reported 24 removals;
+      **14 were findings being silenced**, 8 of them genuine. The honest figure is 10.
+      *A wild scan is evidence about false positives only.* False negatives need fixtures that
+      deliberately exceed what the analysis can resolve, and there are now two.
+
+- [x] **Merged branches deleted a third time**, and `v0` moved unattended again. Three releases
+      in, both are reflexes rather than decisions — the repo setting for auto-deleting head
+      branches would remove one of them permanently.
 
 ## Cross-cutting
 
