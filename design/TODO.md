@@ -594,10 +594,16 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       model and `tokenizer(x["question"])` was a forward pass — TG002 reported a missing
       `no_grad` around *tokenisation*. Same for feature extractors and image processors. Two
       findings, and the guard test asserts a real `AutoModelForCausalLM` still counts.
-- [ ] **Decide whether TG008 should be a note.** 31 findings, factually right, but most are
-      synthetic-data example scripts where seeding changes nothing observable. Same
-      "true but not actionable" profile that moved TG004 under RFC 0003, so it deserves the
-      same test: is this code defective, or merely untuned?
+- [ ] **Split TG008 rather than demoting it.** Applying the RFC 0003 test gives two answers,
+      because the rule reports two things. *No seeding at all* is a choice we often cannot see —
+      seeding frequently lives in the launcher, not the script — so that is a `note`. *Partial*
+      seeding, torch seeded and NumPy not, is a defect whose intent is visible in the code, and
+      stays a `warning`. On the seven-repo corpus that is **30 notes and 1 warning**, and the one
+      that remains is the informative one. Awaiting a decision, since it changes public severity.
+- [x] **Wrote up the scan** as [spike 0002](spikes/0002-scanning-real-training-repos.md), and
+      indexed both spikes and RFC 0003 in `design/README.md`, which had never listed them.
+      Re-measured torch to check the README's figure rather than trusting it: still **20 findings
+      across 2,285 files**, 18 of them in `torch/testing/_internal`.
 - [ ] **Two known false-positive causes remain unfixed**, both surfacing in TG002: non-model
       callables read as forward passes (`tokenizer(...)`, `feature_extractor(...)`), and
       deliberate gradient use for attribution (`captumyt.py`). Also still open, from TG001:
