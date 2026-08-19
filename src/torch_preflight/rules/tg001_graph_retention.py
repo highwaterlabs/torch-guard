@@ -87,6 +87,9 @@ when it becomes the training loss, and the two are written identically.
         self._flows_from: Dict[Key, Set[Key]] = {}
         self._backward_seeds: Set[Key] = set()
         self._return_seeds: Set[Key] = set()
+        #: Bare names handed back, resolved at verdict time. A bare name is evidence only
+        #: when it is not itself a holder -- see :meth:`_return_keys`.
+        self._returned_bare: Set[Key] = set()
 
     # ------------------------------------------------------------------ collection
 
@@ -213,13 +216,27 @@ when it becomes the training loss, and the two are written identically.
                 keys |= self._return_keys(element.value)
             return keys
         if isinstance(expr, (cst.Name, cst.Attribute)) and dotted_name(expr) is not None:
+            # Held back rather than discarded. Returning the *container* says nothing, but
+            # returning something *derived* from it hands over the graph -- and both are
+            # written as a bare name. `trl`'s GRPO trainer does
+            # `logps = torch.cat(all_logps, dim=0)` then `return logps, entropies, aux_loss`,
+            # where `logps` is not the container. Which case this is cannot be known until
+            # every holder has been seen, so the decision moves to `leave_Module`.
+            self._returned_bare |= self._read_keys(expr)
             return set()
         return self._read_keys(expr)
 
     # ------------------------------------------------------------------ verdict
 
     def leave_Module(self, original_node: cst.Module) -> None:
-        load_bearing = self._reachable(self._backward_seeds | self._return_seeds)
+        # A returned bare name counts as evidence unless it is a holder itself. `return
+        # losses` must not excuse `losses`, but `return logps` may excuse the container
+        # `logps` was concatenated from.
+        holders = {candidate.holder for candidate in self._candidates}
+        derived_returns = self._returned_bare - holders
+        load_bearing = self._reachable(
+            self._backward_seeds | self._return_seeds | derived_returns
+        )
         already_backwarded = self._reachable(self._backward_seeds)
 
         for candidate in self._candidates:

@@ -106,6 +106,11 @@ exactly as the explicit loop does.
     def _in_comprehension(self) -> bool:
         return any(scope.kind == "comprehension" for scope in self.scopes)
 
+    def _iterates_a_range(self, frame) -> bool:
+        """Does this loop walk an index range, as per-element iteration does?"""
+        iterable = getattr(frame.node, "iter", None)
+        return isinstance(iterable, cst.Call) and final_attr(iterable.func) == "range"
+
     def _iterates_batches(self, frame) -> bool:
         iterable = (frame.iterable or "").lower()
         return any(hint in iterable for hint in BATCH_ITERABLES)
@@ -130,6 +135,17 @@ exactly as the explicit loop does.
         if len(loops) < 2:
             return None
         innermost = loops[-1]
+        # Per-element syncing is what costs time, so require evidence of it rather than
+        # assuming it. A loop over `range(...)` indexes elements; a loop over anything else
+        # is yielding batches, whatever it happens to be called.
+        #
+        # This replaces a name-based exemption that listed `loader`, `dataloader`,
+        # `batches`... and therefore missed `dev_iter` and `valloader`. The result was that
+        # `correct += (predicted == labels).sum().item()` in a validation loop got flagged --
+        # which is *verbatim* the fix this rule's own hint recommends. A rule that reports
+        # its own advice is worse than one that stays quiet.
+        if not self._iterates_a_range(innermost):
+            return None
         # If the innermost loop is itself the one doing the backward pass, the sync is
         # once per step.
         if contains_call_to(innermost.node, ["backward"]):

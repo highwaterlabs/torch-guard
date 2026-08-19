@@ -63,6 +63,32 @@ def test_tg001_errors_when_nothing_backwards_the_stored_tensor():
     assert "stays in VRAM" in diagnostics[0].message
 
 
+def test_tg001_quiet_when_a_derived_bare_name_is_returned():
+    """Reduced from `trl/trainer/grpo_trainer.py` and torchtune's `linear_grpo_loss.py`.
+
+    `return logps, ...` is a bare name, which the rule above deliberately treats as no
+    evidence — but `logps` is not the container, it is `torch.cat(all_logps)`. Returning it
+    hands the caller a graph that the GRPO objective then backwards.
+
+    So a returned bare name counts unless it is *itself* a holder. That keeps `return losses`
+    from excusing `losses` while letting a reduction of it through, and the two cannot be
+    told apart until every holder has been seen.
+    """
+    assert codes(
+        """
+        import torch
+
+        def _get_per_token_logps(self, model, input_ids, batches):
+            all_logps = []
+            for input_ids_batch in batches:
+                logits = model(input_ids_batch).logits
+                all_logps.append(selective_log_softmax(logits, input_ids_batch))
+            logps = torch.cat(all_logps, dim=0)
+            return logps
+        """
+    ) == []
+
+
 def test_tg001_returning_a_bare_container_is_not_evidence_of_a_deferred_backward():
     """`return losses` must not excuse the retention.
 
@@ -488,6 +514,33 @@ def test_tg001_exemption_does_not_leak_between_functions():
 
 
 # --------------------------------------------------------------------- TG002
+
+
+def test_tg002_quiet_when_the_eval_looking_loop_is_the_one_that_backwards():
+    """Reduced from `pytorch/tutorials/beginner_source/fgsm_tutorial.py`.
+
+    An adversarial attack iterates `test_loader` and backwards through it deliberately, to
+    get gradients with respect to the input. We reported that `test()` "never calls
+    `.backward()`" while the call sat nine lines below.
+
+    The carve-out being corrected exists for a function that both trains and validates, where
+    a backward elsewhere should not excuse the validation loop. It just has to check that the
+    backward is not in *this* loop.
+    """
+    assert "TG002" not in codes(
+        """
+        def test(model, device, test_loader, epsilon):
+            correct = 0
+            for data, target in test_loader:
+                data.requires_grad = True
+                output = model(data)
+                loss = F.nll_loss(output, target)
+                model.zero_grad()
+                loss.backward()
+                data_grad = data.grad.data
+            return correct
+        """
+    )
 
 
 def test_tg002_flags_eval_function_without_no_grad():
@@ -1839,6 +1892,33 @@ def test_tg007_flags_a_sync_in_a_nested_loop():
                 optimizer.step()
                 for i in range(len(preds)):
                     correct += preds[i].item()
+        """
+    )
+
+
+def test_tg007_does_not_flag_its_own_recommended_fix():
+    """`(preds == targets).sum().item()` is what this rule's hint tells you to write.
+
+    Found by re-triaging seven real repos: all six TG007 findings were this shape, in a
+    validation loop nested inside a training loop. The rule had a batch-loop exemption, but
+    it matched iterable *names* — `loader`, `dataloader`, `batches` — and these loops iterate
+    `dev_iter` and `valloader`.
+
+    A longer name list would have patched the instance. The rule now requires evidence of
+    per-element iteration instead: a loop over `range(...)` indexes elements, a loop over
+    anything else yields batches whatever it is called.
+    """
+    assert "TG007" not in codes(
+        """
+        def run(model, loader, dev_iter, criterion, optimizer):
+            for x, y in loader:
+                loss = criterion(model(x), y)
+                loss.backward()
+                optimizer.step()
+                correct = 0
+                for dev_batch in dev_iter:
+                    preds = model(dev_batch.text)
+                    correct += (preds.argmax(1) == dev_batch.label).sum().item()
         """
     )
 
