@@ -20,7 +20,7 @@ runs sequentially.
 **Exit codes:** `0` clean · `1` findings at or above `--fail-on` (default `error`, so
 performance warnings do not break CI) · `2` bad invocation.
 
-### Global options
+## Global options
 
 | Flag | Argument | Default | Description |
 |---|---|---|---|
