@@ -43,6 +43,13 @@ MODEL_NAME_HINTS = frozenset(
     }
 )
 
+#: `from_pretrained` classes that load a *preprocessor* rather than a model. Calling one is
+#: tokenization or feature extraction, not a forward pass, and no autograd is involved.
+NOT_A_MODEL_HINTS = (
+    "tokenizer", "featureextractor", "imageprocessor", "processor", "extractor",
+    "config", "scheduler",
+)
+
 # Variable names conventionally holding a loss function.
 CRITERION_NAME_HINTS = frozenset(
     {"criterion", "loss_fn", "loss_func", "lossfn", "loss_function", "objective", "crit"}
@@ -534,6 +541,15 @@ class _Collector(ScopeTrackingVisitor):
             return False
         leaf = final_attr(value.func)
         dotted = dotted_name(value.func) or ""
+
+        # `from_pretrained` loads preprocessors as well as models, and it is in
+        # MODEL_WRAPPERS, so it matches before anything else can object. Reading
+        # `AutoTokenizer.from_pretrained(...)` as a model made `tokenizer(x["question"])`
+        # look like a forward pass, and TG002 duly reported a missing `no_grad` around
+        # tokenization. Same for feature extractors and image processors.
+        if any(hint in dotted.lower() for hint in NOT_A_MODEL_HINTS):
+            return False
+
         if leaf in self.prov.module_classes or leaf in MODEL_WRAPPERS:
             return True
         if leaf in QUALIFIED_MODEL_WRAPPERS:

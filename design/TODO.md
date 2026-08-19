@@ -576,8 +576,24 @@ Per RFC [0001](rfcs/0001-vram-estimator.md). No new **required** dependencies.
       a sample of the 207 notes were all genuine `DataLoader` calls missing `num_workers` or
       `pin_memory`; the problem was only volume, which making it a note already solved.
 
-- [ ] **Finish triaging TG013 (10).** Mixed shapes, needs individual reads rather than
-      clustering — the only rule not carried to a verdict in this pass.
+- [x] **Finished triaging TG013 (10): 3 false, 7 true.** Two causes, both narrow:
+      - **A download is not a redundant upload.** `pinmem_nonblock.py` loops 100 times over
+        `tensor.to("cpu", non_blocking=True)` on a tensor created with `device="cuda"` — in a
+        tutorial whose whole subject is measuring transfer behaviour. Wrong twice over, and
+        `_device_argument` was accepting a `"cpu"` literal as a destination.
+      - **Restoring the device after a deliberate `.cpu()` is required.** `fast_neural_style`
+        does `transformer.eval().cpu()`, writes a checkpoint, then `transformer.to(device)
+        .train()`. Hoisting that out would leave the model on the host for the rest of
+        training.
+
+      The 7 true ones are all the mild `device=` advice the rule is meant to give — a host
+      factory or a `torch.tensor(python_list)` inside a loop — plus one genuinely hoistable
+      constant, `self.STOP_TOKENS_TENSOR.to(self._device)` in torchtune.
+- [x] **`from_pretrained` no longer makes a preprocessor a model.** It is in `MODEL_WRAPPERS`
+      and matched before anything could object, so `AutoTokenizer.from_pretrained(...)` was a
+      model and `tokenizer(x["question"])` was a forward pass — TG002 reported a missing
+      `no_grad` around *tokenisation*. Same for feature extractors and image processors. Two
+      findings, and the guard test asserts a real `AutoModelForCausalLM` still counts.
 - [ ] **Decide whether TG008 should be a note.** 31 findings, factually right, but most are
       synthetic-data example scripts where seeding changes nothing observable. Same
       "true but not actionable" profile that moved TG004 under RFC 0003, so it deserves the

@@ -586,6 +586,40 @@ def test_tg002_flags_inline_validation_loop_inside_training():
     assert not diagnostics[0].fixable
 
 
+def test_tg002_quiet_for_a_preprocessor_loaded_with_from_pretrained():
+    """Reduced from `transformers/examples/pytorch/continuous_batching_simple.py`.
+
+    `from_pretrained` loads preprocessors as well as models, and it sits in MODEL_WRAPPERS,
+    so it matched before anything could object. That made `tokenizer(x["question"])` look
+    like a forward pass, and TG002 reported a missing `no_grad` around *tokenisation*.
+    """
+    assert "TG002" not in codes(
+        """
+        from transformers import AutoTokenizer
+
+        def main(dataset):
+            tokenizer = AutoTokenizer.from_pretrained("gpt2", padding_side="left")
+            return dataset.map(lambda x: tokenizer(x["question"]), batched=True)
+        """
+    )
+
+
+def test_tg002_still_flags_a_real_model_loaded_with_from_pretrained():
+    """The guard: excluding preprocessors must not exclude models."""
+    assert "TG002" in codes(
+        """
+        from transformers import AutoModelForCausalLM
+
+        def evaluate(dataset):
+            model = AutoModelForCausalLM.from_pretrained("gpt2")
+            model.eval()
+            for batch in dataset:
+                outputs = model(**batch)
+            return outputs
+        """
+    )
+
+
 def test_tg002_quiet_when_guarded():
     for guard in ("@torch.no_grad()", "@torch.inference_mode()", "@torch.no_grad"):
         assert codes(
@@ -1773,6 +1807,51 @@ def transfer_loop(*body: str) -> str:
         "def train(model, loader, optimizer, criterion, class_weights, device):\n"
         "    for x, y in loader:\n"
     ) + lines
+
+
+def test_tg013_quiet_for_a_download():
+    """Reduced from `pytorch/tutorials/intermediate_source/pinmem_nonblock.py`.
+
+    The rule is about re-*uploading* the same data every iteration. `.to("cpu")` is a
+    download, and the file it fired on is a tutorial whose whole subject is measuring
+    transfer behaviour — the tensor is created with `device="cuda"` and copied to the host
+    100 times deliberately. Wrong on both counts.
+    """
+    assert "TG013" not in codes(
+        """
+        import torch
+
+        tensor = torch.arange(1, 1000, device="cuda")
+        for i in range(100):
+            cpu_tensor = tensor.to("cpu", non_blocking=True)
+            torch.testing.assert_close(cpu_tensor.mean(), torch.tensor(500.0))
+        """
+    )
+
+
+def test_tg013_quiet_when_restoring_the_device_after_a_deliberate_cpu_move():
+    """Reduced from `pytorch/examples/fast_neural_style`.
+
+    The model is moved to the host to write a checkpoint and moved back afterwards. That
+    `.to(device)` is required, not redundant — hoisting it out would leave the model on the
+    host for the rest of training.
+    """
+    assert "TG013" not in codes(
+        """
+        import torch
+
+        def train(transformer, loader, device, optimizer):
+            for batch_id, (x, _) in enumerate(loader):
+                loss = transformer(x).sum()
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                if batch_id % 100 == 0:
+                    transformer.eval().cpu()
+                    torch.save(transformer.state_dict(), "ckpt.pth")
+                    transformer.to(device).train()
+        """
+    )
 
 
 def test_tg013_flags_a_loop_invariant_transfer():

@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import libcst as cst
 
-from ..analysis.helpers import dotted_name, final_attr, positional_args
+from ..analysis.helpers import base_name, dotted_name, final_attr, positional_args
 from ..analysis.scope import target_names
 from ..diagnostics import Category, Severity
 from .base import Rule, register
@@ -100,6 +100,13 @@ belong in the loop, so the copy overlaps with compute (see TG004).
             return True
 
         receiver = func.value
+
+        # Restoring the device after a deliberate `.cpu()` is required, not redundant.
+        # `fast_neural_style` does `transformer.eval().cpu()`, saves a checkpoint, then
+        # `transformer.to(device).train()`. Hoisting that out would leave the model on the
+        # host for the rest of training.
+        if self._moved_to_host_in_loop(receiver):
+            return True
 
         # A tensor built on the host inside the loop, then copied to the device.
         factory = self._host_factory(receiver)
@@ -200,11 +207,41 @@ belong in the loop, so the copy overlaps with compute (see TG004).
         first = args[0].value
         if isinstance(first, cst.SimpleString):
             text = first.value.strip("\"'").lower()
-            return first if ("cuda" in text or "cpu" in text or "mps" in text) else None
+            # `.to("cpu")` is a *download*, and this rule is about re-uploading the same data
+            # to the device every iteration. `pinmem_nonblock.py` -- a tutorial whose subject
+            # is measuring transfer behaviour -- loops 100 times over
+            # `tensor.to("cpu", non_blocking=True)` on a tensor created with `device="cuda"`,
+            # which was wrong on both counts.
+            if "cpu" in text:
+                return None
+            return first if ("cuda" in text or "mps" in text) else None
         name = dotted_name(first)
         if name and "device" in name.lower():
             return first
         return None
+
+    def _moved_to_host_in_loop(self, receiver: cst.BaseExpression) -> bool:
+        """Is this receiver explicitly sent to the host somewhere in the same loop?"""
+        base = base_name(receiver)
+        frame = self.innermost_loop
+        if base is None or frame is None:
+            return False
+
+        class _Probe(cst.CSTVisitor):
+            def __init__(self) -> None:
+                self.found = False
+
+            def visit_Call(self, node: cst.Call) -> bool:
+                func = node.func
+                if not isinstance(func, cst.Attribute):
+                    return True
+                if func.attr.value == "cpu" and base_name(func.value) == base:
+                    self.found = True
+                return True
+
+        probe = _Probe()
+        frame.node.visit(probe)
+        return probe.found
 
     def _host_factory(self, receiver: cst.BaseExpression) -> Optional[str]:
         """``torch.zeros(...)`` etc., built on the host because no ``device=`` was given."""
