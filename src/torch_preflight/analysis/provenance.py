@@ -18,7 +18,7 @@ cost money.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import libcst as cst
 
@@ -26,6 +26,7 @@ from .helpers import (
     DETACHING_BUILTINS,
     DETACHING_METHODS,
     NON_DIFFERENTIABLE_METHODS,
+    base_name,
     dotted_name,
     final_attr,
     is_literal_true,
@@ -100,6 +101,10 @@ MODEL_WRAPPERS = frozenset(
 QUALIFIED_MODEL_WRAPPERS = frozenset({"prepare", "prepare_model"})
 QUALIFIED_WRAPPER_RECEIVERS = ("accel", "fabric")
 
+#: Receivers whose ``.backward(loss)`` takes the tensor as an argument rather than being
+#: one. Accelerate, Lightning Fabric and DeepSpeed engines all use this shape.
+BACKWARD_WRAPPER_RECEIVERS = ("accel", "fabric", "scaler", "engine", "strategy")
+
 # Aggregations that preserve the graph, so grad flows from their arguments.
 PROPAGATING_BUILTINS = frozenset({"sum", "min", "max", "abs", "sorted", "next", "iter"})
 
@@ -123,6 +128,10 @@ class _Assignment:
     #: A positional "am I inside a no-grad block" check misses that, which is what made
     #: TG001 fire on the standard Hugging Face evaluation loop.
     no_grad: bool = False
+    #: Identities of the loops enclosing this assignment, outermost first. Used to tell two
+    #: assignments to the same name apart when they live in sibling loops -- a training loop
+    #: and an evaluation loop in one function, which is the shape that defeated `no_grad`.
+    loops: Tuple[int, ...] = ()
 
 
 @dataclass
@@ -142,6 +151,19 @@ class Provenance:
     module_classes: Set[str] = field(default_factory=set)
     #: Names that were explicitly detached somewhere (used only for hint wording).
     detached: Set[str] = field(default_factory=set)
+    #: ``(scope, name) -> loop identities inside which the binding carried no graph``.
+    #:
+    #: Python has function scope, not block scope, so this cannot simply shadow the name.
+    #: It says "within *this* loop, that binding held a detached value", which is what
+    #: separates an evaluation loop from a training loop in the same function.
+    #:
+    #: Deliberately broader than ``no_grad``: any binding that does not evaluate as
+    #: grad-bearing *in its own loop* is recorded, so a name is judged by the assignment
+    #: that reaches it rather than by every assignment in the function. That also means an
+    #: analysis gap can now actively silence a name rather than merely fail to seed it --
+    #: the trade is fewer false positives against the risk of a quiet false negative, and
+    #: it is the reason the rule suite and a seven-repo scan are both checked for movement.
+    not_grad_in_loops: Dict[Tuple[ScopePath, str], Set[int]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ queries
 
@@ -216,9 +238,34 @@ class Provenance:
                 return None  # bound here as something else; stop walking out
         return None
 
-    def is_grad_bearing(self, node: cst.BaseExpression, scope: ScopePath) -> bool:
-        """Does evaluating ``node`` here yield a tensor attached to an autograd graph?"""
-        return _ExprGrad(self, scope).check(node)
+    def is_grad_bearing(
+        self,
+        node: cst.BaseExpression,
+        scope: ScopePath,
+        loops: Sequence[int] = (),
+    ) -> bool:
+        """Does evaluating ``node`` here yield a tensor attached to an autograd graph?
+
+        ``loops`` identifies the loops enclosing the *use*, so a name bound under
+        ``no_grad`` in one loop is not read as grad-bearing there merely because a sibling
+        loop binds the same name normally.
+        """
+        return _ExprGrad(self, scope, tuple(loops)).check(node)
+
+    def detached_here(self, name: str, scope: ScopePath, loops: Sequence[int]) -> bool:
+        """Was ``name`` bound under ``no_grad`` inside one of the loops we are in?
+
+        Scoped the same way as :meth:`is_grad_name`: walk innermost-outward. Requires an
+        enclosing loop in common, so a `no_grad` block elsewhere in the function does not
+        silence a name that a training loop legitimately rebinds.
+        """
+        if not loops:
+            return False
+        for depth in range(len(scope), -1, -1):
+            found = self.not_grad_in_loops.get((scope[:depth], name))
+            if found and found.intersection(loops):
+                return True
+        return False
 
     def is_explicitly_detached(self, node: cst.BaseExpression) -> bool:
         """True if the outermost operation of ``node`` severs the graph."""
@@ -234,19 +281,27 @@ class Provenance:
 class _ExprGrad:
     """Recursive expression evaluator for grad-bearing-ness."""
 
-    def __init__(self, prov: Provenance, scope: ScopePath) -> None:
+    def __init__(
+        self, prov: Provenance, scope: ScopePath, loops: Tuple[int, ...] = ()
+    ) -> None:
         self.prov = prov
         self.scope = scope
+        self.loops = loops
 
     def check(self, node: Optional[cst.CSTNode], depth: int = 0) -> bool:
         if node is None or depth > 24:
             return False
 
         if isinstance(node, cst.Name):
+            if self.prov.detached_here(node.value, self.scope, self.loops):
+                return False
             return self.prov.is_grad_name(node.value, self.scope)
 
         if isinstance(node, cst.Attribute):
             dotted = dotted_name(node)
+            base = base_name(node)
+            if base and self.prov.detached_here(base, self.scope, self.loops):
+                return False  # ``outputs.loss`` where ``outputs`` came from a no_grad forward
             if dotted and self.prov.is_grad_name(dotted, self.scope):
                 return True
             # ``x.grad``/``x.data`` are detached views; everything else inherits.
@@ -431,9 +486,13 @@ class _Collector(ScopeTrackingVisitor):
         if not targets:
             return
         scope = self.scope_path
+        loops = tuple(id(frame.node) for frame in self.loops)
         self.assignments.append(
-            _Assignment(scope, targets, value, augmented, self.in_no_grad)
+            _Assignment(scope, targets, value, augmented, self.in_no_grad, loops)
         )
+        if self.in_no_grad and loops:
+            for name in targets:
+                self.prov.not_grad_in_loops.setdefault((scope, name), set()).update(loops)
         self.prov.bindings.setdefault(scope, set()).update(targets)
 
         for name in targets:
@@ -478,14 +537,29 @@ class _Collector(ScopeTrackingVisitor):
     # -- seeds: anything ``.backward()`` is called on is definitively grad-bearing
 
     def visit_Call(self, node: cst.Call) -> bool:
-        receiver = None
         func = node.func
-        if isinstance(func, cst.Attribute) and func.attr.value == "backward":
-            receiver = func.value
-        if receiver is not None:
-            name = dotted_name(receiver)
-            if name:
-                self.seeds.add((self.scope_path, name))
+        if not isinstance(func, cst.Attribute) or func.attr.value != "backward":
+            return True
+
+        name = dotted_name(func.value)
+        if not name:
+            return True
+
+        # `accelerator.backward(loss)` and `fabric.backward(loss)` invert the usual shape:
+        # the tensor is the *argument*, and the receiver is a framework object. Seeding the
+        # receiver made `accelerator` itself read as a live tensor, so every later
+        # `accelerator.gather_for_metrics(...)` looked grad-bearing -- which is how a
+        # detached evaluation loop still produced a TG001 error.
+        leaf = name.rsplit(".", 1)[-1].lower()
+        if any(hint in leaf for hint in BACKWARD_WRAPPER_RECEIVERS):
+            args = [a for a in node.args if a.keyword is None]
+            if args:
+                argument = dotted_name(args[0].value)
+                if argument:
+                    self.seeds.add((self.scope_path, argument))
+            return True
+
+        self.seeds.add((self.scope_path, name))
         return True
 
     # -- ``x.requires_grad = True`` --------------------------------------------
@@ -501,6 +575,28 @@ class _Collector(ScopeTrackingVisitor):
                 if self._pending_value.value == "True":
                     self.seeds.add((self.scope_path, name))
         return True
+
+
+def _reads_detached_name(
+    prov: Provenance,
+    value: cst.BaseExpression,
+    scope: ScopePath,
+    loops: Tuple[int, ...],
+) -> bool:
+    """Does ``value`` read a name already known to hold no graph inside ``loops``?"""
+
+    class _Probe(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.found = False
+
+        def visit_Name(self, node: cst.Name) -> bool:
+            if prov.detached_here(node.value, scope, loops):
+                self.found = True
+            return True
+
+    probe = _Probe()
+    value.visit(probe)
+    return probe.found
 
 
 def analyze(module: cst.Module) -> Provenance:
@@ -530,7 +626,24 @@ def analyze(module: cst.Module) -> Provenance:
             # Autograd was off when this ran, so the value has no graph to propagate.
             if assignment.no_grad:
                 continue
-            if not prov.is_grad_bearing(assignment.value, assignment.scope):
+            if not prov.is_grad_bearing(
+                assignment.value, assignment.scope, assignment.loops
+            ):
+                # Propagate the *detachment* one hop, so `loss = outputs.loss` inherits it
+                # from an `outputs` that a no_grad forward produced. This requires positive
+                # evidence -- the value must read a name already known detached in these
+                # loops. "We could not prove it carries a graph" is not evidence: treating
+                # absence of proof as detachment silenced `loss = compute_loss(...)` and,
+                # worse, silenced it even when `loss.backward()` was called on it.
+                if assignment.loops and _reads_detached_name(
+                    prov, assignment.value, assignment.scope, assignment.loops
+                ):
+                    for name in assignment.targets:
+                        key = (assignment.scope, name)
+                        known = prov.not_grad_in_loops.setdefault(key, set())
+                        if not known.issuperset(assignment.loops):
+                            known.update(assignment.loops)
+                            changed = True
                 continue
             for name in assignment.targets:
                 key = (assignment.scope, name)
