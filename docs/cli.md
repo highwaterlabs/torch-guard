@@ -20,13 +20,13 @@ runs sequentially.
 **Exit codes:** `0` clean · `1` findings at or above `--fail-on` (default `error`, so
 performance warnings do not break CI) · `2` bad invocation.
 
-## Commands
-
 ### Global options
 
 | Flag | Argument | Default | Description |
 |---|---|---|---|
 | `--version` | — | — | Show the installed torch-preflight version and exit |
+
+## Commands
 
 ### `check`
 
@@ -38,9 +38,9 @@ Analyze files or directories for PyTorch anti-patterns.
 | `-f`, `--format` | `terminal`, `json`, `github`, `sarif` | `terminal` | Output format |
 | `--fix` | — | `false` | Apply autofixes in place |
 | `--diff` | — | `false` | Show what `--fix` would change without writing |
-| `--select` | rule codes | none | Only run these rules; comma-separated values are supported |
-| `--ignore` | rule codes | none | Skip these rules; comma-separated values are supported |
-| `--exclude` | path pattern | none | Skip paths matching the pattern |
+| `--select` | rule codes | none | Only run these rules; repeatable and comma-separated |
+| `--ignore` | rule codes | none | Skip these rules; repeatable and comma-separated |
+| `--exclude` | path pattern | none | Skip paths matching the pattern; repeatable, but commas are not split |
 | `--fail-on` | severity | `error` | Minimum severity that makes the run fail |
 | `-j`, `--jobs` | number | CPU count | Number of worker processes; `1` disables parallelism |
 | `--target-gpu` | GPU | none | Target GPU for the TG010 projected-OOM gate |
@@ -66,13 +66,15 @@ This command has no additional flags or arguments.
 
 Project peak VRAM for a training script before you launch it.
 
+Give a script to read, or `--model` / `--params`. Everything else overrides what is found in the script.
+
 | Flag | Argument | Default | Description |
 |---|---|---|---|
-| `path` | training script | required* | Training script to read the config from |
+| `path` | training script | none | Training script to read the config from |
 | `--gpu` | GPU or cloud instance | none | Target GPU or cloud instance |
 | `--gpu-memory` | capacity | none | Explicit capacity for unlisted hardware, e.g. `48GiB` |
 | `--model` | model name or entry point | none | Architecture name or entry point |
-| `--model-args` | `KEY=VALUE` | none | Constructor arguments for a `--model` entry point |
+| `--model-args` | `KEY=VALUE` | none | Constructor argument for a `--model` entry point; repeatable |
 | `--params` | parameter count | none | Parameter count when the model is unknown, e.g. `7B` |
 | `--online` | — | `false` | Allow Hugging Face Hub lookup for unknown architectures |
 | `--batch-size` | number | none | Override per-device micro-batch |
