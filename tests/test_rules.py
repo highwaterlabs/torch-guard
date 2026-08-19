@@ -2098,8 +2098,14 @@ def test_tg007_silent_when_the_receiver_is_not_a_tensor():
 # --------------------------------------------------------------------- TG008
 
 
-def test_tg008_flags_a_training_run_with_no_seed():
-    assert "TG008" in codes(
+def test_tg008_no_seeding_at_all_is_a_note():
+    """RFC 0003: often a choice, and often one this tool cannot see.
+
+    Seeding frequently lives in the launcher or the job scheduler rather than the training
+    script, and some runs deliberately want variance across invocations. We are reading the
+    script, so we report it without claiming the run is defective.
+    """
+    diagnostics = analyze(
         """
         import torch
         def train(model, loader, optimizer, criterion):
@@ -2110,6 +2116,9 @@ def test_tg008_flags_a_training_run_with_no_seed():
                 optimizer.step()
         """
     )
+    found = [d for d in diagnostics if d.code == "TG008"]
+    assert found
+    assert found[0].severity is Severity.NOTE
 
 
 def test_tg008_flags_partial_seeding():
@@ -2129,6 +2138,9 @@ def test_tg008_flags_partial_seeding():
     found = [d for d in diagnostics if d.code == "TG008"]
     assert found, "seeding torch does nothing for NumPy"
     assert "NumPy" in found[0].message
+    # A defect rather than a choice: the intent is visible in the code -- someone asked for
+    # reproducibility -- and a generator is escaping anyway. So this one gates a build.
+    assert found[0].severity is Severity.WARNING
 
 
 def test_tg008_silent_when_every_generator_is_seeded():

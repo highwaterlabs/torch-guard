@@ -73,6 +73,14 @@ Two things this rule deliberately does not claim:
 
 It only fires on files that actually train (something calls ``.backward()``). A library that
 draws randomly and leaves seeding to its caller is behaving correctly.
+
+The two cases are reported at different levels, because they are different findings:
+
+* **Partial seeding is a warning.** The intent is visible in the code — someone asked for
+  reproducibility — and a generator is escaping anyway. That is a defect.
+* **No seeding at all is a note.** It is often a choice, and often one this tool cannot see:
+  seeding frequently lives in the launcher or the job scheduler rather than the training
+  script, and some runs deliberately want variance across invocations.
 """.strip()
 
     def __init__(self, ctx) -> None:
@@ -156,14 +164,29 @@ draws randomly and leaves seeding to its caller is behaving correctly.
         calls = ", ".join(_LABELS[source][0] for source in missing)
         drawn = " and ".join(_LABELS[source][1] for source in missing)
 
+        # Two findings, not one, and RFC 0003's test ("is this code defective, or merely
+        # untuned?") gives them different answers.
+        #
+        # Partial seeding is a *defect*: the author's intent is visible in the code -- they
+        # asked for reproducibility -- and a generator is escaping anyway. That is a warning.
+        #
+        # No seeding at all is a *choice*, and often one we cannot see. Seeding frequently
+        # lives in the launcher or the scheduler rather than the script, and this tool only
+        # reads the script; some runs deliberately want variance across invocations. That is
+        # a note.
+        #
+        # On seven real training repos the split is 30 notes and 1 warning, and the one that
+        # stays a warning is the informative one.
         if self._seeded:
             already = " and ".join(sorted(self._seeded))
+            severity = Severity.WARNING
             message = (
                 f"This run draws from {drawn} without seeding it — {already} is seeded, but "
                 f"the generators are independent, so the run still varies between "
                 f"invocations."
             )
         else:
+            severity = Severity.NOTE
             message = (
                 f"This training run draws from {drawn} with no seed set, so it cannot be "
                 f"reproduced and a change in results cannot be attributed to a change in "
@@ -178,4 +201,5 @@ draws randomly and leaves seeding to its caller is behaving correctly.
             message,
             hint=f"Call {calls} at startup, or one helper that covers every generator "
                  f"(`seed_everything(seed)` / `set_seed(seed)`).",
+            severity=severity,
         )
